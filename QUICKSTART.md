@@ -2,11 +2,14 @@
 
 ## For Users: Installing the Plugin
 
-### Manual Installation
+### Option 1: From ncSender Plugin Manager (Coming Soon)
+Once published, you'll be able to install directly from ncSender's Plugin Manager.
 
-1. Download the latest release from [GitHub Releases](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/releases)
+### Option 2: Manual Installation
+
+1. Download the latest release from [GitHub Releases](https://github.com/YOUR_USERNAME/ncsender-plugin-fusion360-tool-importer/releases)
 2. Locate your ncSender plugins directory:
-   - **macOS**: `~/Library/Application Support/ncsender/plugins/`
+   - **macOS**: `~/Library/Application Support/ncSender/plugins/`
    - **Windows**: `%APPDATA%\ncSender\plugins\`
    - **Linux**: `~/.config/ncSender/plugins/`
 3. Extract the downloaded ZIP file into the plugins directory
@@ -19,7 +22,7 @@
 
 ```bash
 cd ~/GitHub
-git clone https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer.git
+git clone https://github.com/YOUR_USERNAME/ncsender-plugin-fusion360-tool-importer.git
 cd ncsender-plugin-fusion360-tool-importer
 ```
 
@@ -71,6 +74,7 @@ The GitHub Action will automatically:
 
 ### Importing into ncSender
 
+**First Import**:
 1. Open ncSender
 2. Go to **Tools** tab
 3. Click **Import** dropdown
@@ -78,18 +82,47 @@ The GitHub Action will automatically:
 5. Choose your exported JSON file
 6. Review imported tools
 
+**Re-Importing (v1.1.0+)**:
+- When you re-import the same library, ncSender will detect existing tools by ID
+- You'll be prompted: "Replace existing tools and import?"
+- Choose **Yes** to update tools with changes from Fusion 360
+- Choose **No** to keep existing tools
+
 ### Configuration
 
 Go to **Plugins** → **Fusion 360 Tool Library Import** → **Settings**:
 
 - **Include Fusion tool number**: When enabled, tool descriptions will be prefixed with Fusion 360's tool number (e.g., "42 - 1/4\" End Mill")
 
-### Tool Number Mapping
+### Important: Tool Length Offset (TLO)
 
+⚠️ **TLO values are NOT imported from Fusion 360**
+
+All imported tools will have TLO = 0. You MUST measure tool length offsets on your machine using:
+- Automatic probing (if your machine supports it)
+- Manual touch-off
+- Tool setter/height gauge
+
+Fusion 360's `assemblyGaugeLength` is for CAM simulation only and does not represent your machine's actual tool offsets.
+
+### Tool ID and Number Mapping
+
+**Duplicate Prevention (New in v1.1.0)**:
+- **Fusion 360 `number`** field → **ncSender `id`** (for duplicate detection)
 - **Fusion 360 `turret`** field → **ncSender `toolNumber`** (ATC slot)
-- **Fusion 360 `number`** field → Optional prefix in tool description (not ATC slot)
 
-If a tool has `turret = 0` in Fusion 360, it will be imported without an ATC slot assignment.
+**What This Means**:
+- First import: Tool #42 in Fusion → ID 42 in ncSender
+- Re-import same library: ncSender detects tool ID 42 exists and prompts to replace
+- **No duplicate tools** when re-importing!
+
+**Update Workflow**:
+1. Modify tools in Fusion 360
+2. Re-export as JSON
+3. Import in ncSender
+4. Choose "Replace" to sync changes
+
+If a tool has `turret = 0` in Fusion 360, it will be imported without an ATC slot assignment (`toolNumber = null`).
 
 ## Troubleshooting
 
@@ -108,7 +141,13 @@ If a tool has `turret = 0` in Fusion 360, it will be imported without an ATC slo
 
 **Wrong tool numbers:**
 - Remember: ncSender's tool number is the ATC slot (from Fusion's `turret` field)
-- Fusion's tool number (used for CAM identification) is optionally in the description
+- Fusion's tool number becomes the ncSender ID (for duplicate detection, not shown in UI)
+- Fusion's tool number is optionally prefixed in the description
+
+**Duplicate tools after re-import:**
+- This shouldn't happen in v1.1.0+
+- Ensure you're using the latest version of the plugin
+- The conflict dialog should appear if tools already exist
 
 ## Support
 
