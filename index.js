@@ -23,6 +23,13 @@ const DEFAULT_SETTINGS = {
  * Convert Fusion 360 tool to ncSender tool format
  */
 function convertFusionToolToNcSender(fusionTool, settings, existingTools) {
+  // Get Fusion tool number - this becomes the ncSender ID
+  // This ensures consistent IDs across imports and prevents duplicates
+  const fusionToolNumber = fusionTool['post-process']?.number;
+  if (fusionToolNumber === undefined || fusionToolNumber === null) {
+    throw new Error('Tool missing Fusion 360 tool number (post-process.number)');
+  }
+
   // Get tool type
   const fusionType = fusionTool.type?.toLowerCase() || '';
   const ncSenderType = TYPE_MAPPING[fusionType] || 'flat';
@@ -68,10 +75,10 @@ function convertFusionToolToNcSender(fusionTool, settings, existingTools) {
   }
 
   // Build ncSender tool object
-  // ID will be assigned during import
+  // Use Fusion tool number as the ID for consistent imports and duplicate prevention
   const ncSenderTool = {
-    id: 0, // Temporary, will be reassigned
-    toolNumber: toolNumber,
+    id: fusionToolNumber, // Fusion tool number becomes ncSender ID
+    toolNumber: toolNumber, // ATC slot from turret field
     name: description.trim(),
     type: ncSenderType,
     diameter: diameter,
@@ -112,16 +119,19 @@ async function importFusion360Tools(fileContent, fileName) {
     const mergedSettings = { ...DEFAULT_SETTINGS, ...settings };
 
     // Convert each Fusion tool to ncSender format
-    // Use temporary high IDs that won't conflict with existing tools
-    // The import process will handle proper ID assignment
+    // Fusion tool number becomes ncSender ID for duplicate prevention
     const convertedTools = [];
     const skippedTools = [];
-    let tempIdCounter = 100000; // Start from high number to avoid conflicts
 
     for (const tool of fusionData.data) {
       // Filter out tools without required fields
+      if (!tool['post-process']?.number) {
+        skippedTools.push(`Tool missing Fusion 360 tool number (post-process.number)`);
+        continue;
+      }
+
       if (!tool.type) {
-        skippedTools.push(`Tool missing type field`);
+        skippedTools.push(`Tool ${tool['post-process'].number} missing type field`);
         continue;
       }
       
@@ -132,10 +142,8 @@ async function importFusion360Tools(fileContent, fileName) {
       }
 
       try {
-        // Convert tool
+        // Convert tool (ID is set from Fusion tool number inside the function)
         const converted = convertFusionToolToNcSender(tool, mergedSettings, []);
-        // Assign temporary ID (will be reassigned during import merge)
-        converted.id = tempIdCounter++;
         convertedTools.push(converted);
       } catch (error) {
         const toolDesc = tool.description || tool['post-process']?.number || 'unknown';
