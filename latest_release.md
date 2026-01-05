@@ -7,8 +7,7 @@
 * Import tool libraries from Fusion 360 JSON exports
 * Automatic tool type mapping (Flat, Ball, V-Bit, Surfacing, Thread Mill)
 * Intelligent ATC slot mapping from Fusion 360 `turret` field
-* TLO defaults to 0 (must be measured on machine)
-* Optional tool number prefix in descriptions
+* Optional Fusion 360 tool number prefix in descriptions
 * Robust validation and error handling
 * Detailed logging for skipped tools
 * Automatic fallback descriptions for empty tool names
@@ -26,7 +25,7 @@
 
 ### Requirements
 
-* ncSender v0.3.0 or higher
+* ncSender v0.3.114 or higher
 * Fusion 360 JSON export file
 
 ### Installation
@@ -42,6 +41,6 @@ None at this time.
 
 ### Documentation
 
-* [Tool Importer Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/TOOL_IMPORTER_DEVELOPMENT.md)
+* [Tool Importer Development Guide](https://github.com/cotepat/ncSender/blob/kilroy/docs/TOOL_IMPORTER_DEVELOPMENT.md)
 * [Plugin Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_DEVELOPMENT.md)
 

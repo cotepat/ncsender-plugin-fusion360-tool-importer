@@ -1,6 +1,6 @@
 # Fusion 360 Tool Library Importer
 
-> **IMPORTANT DISCLAIMER:** This plugin is part of the ncSender project. If you choose to use it, you do so entirely at your own risk. I am not responsible for any damage, malfunction, or personal injury that may result from the use or misuse of this plugin. Use it with caution and at your own discretion.
+> **IMPORTANT DISCLAIMER:** This plugin is to be used with the ncSender project. If you choose to use it, you do so entirely at your own risk. I am not responsible for any damage, malfunction, or personal injury that may result from the use or misuse of this plugin. Use it with caution and at your own discretion.
 
 Import tool libraries from Autodesk Fusion 360 CAM directly into ncSender.
 
@@ -49,7 +49,6 @@ Install this plugin in ncSender through the Plugins interface.
 ### Important Notes
 
 * **Tool Number vs. ATC Slot**: The plugin correctly maps Fusion 360's `turret` field (ATC slot) to ncSender's `toolNumber`. Fusion 360's tool number (used for CAM identification) is optionally included in the description.
-* **Tool Length Offset**: TLO is always set to 0 during import. You must measure tool length offsets on your machine using probing or manual touch-off.
 * **Unassigned Tools**: Tools with `turret = 0` in Fusion 360 are imported without an ATC slot assignment (`toolNumber = null`).
 
 ## Usage
@@ -74,7 +73,7 @@ Install this plugin in ncSender through the Plugins interface.
 This plugin is part of the ncSender ecosystem: <https://github.com/siganberg/ncSender>
 
 For plugin development documentation, see:
-* [Tool Importer Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/TOOL_IMPORTER_DEVELOPMENT.md)
+* [Tool Importer Development Guide](https://github.com/cotepat/ncSender/blob/kilroy/docs/TOOL_IMPORTER_DEVELOPMENT.md)
 * [Plugin Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_DEVELOPMENT.md)
 
 ## License
@@ -90,6 +89,6 @@ See [latest_release.md](latest_release.md) for the most recent changes.
 If you encounter issues:
 1. Check the ncSender console for error messages
 2. Verify your Fusion 360 JSON export is valid
-3. Review the [Tool Importer Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/TOOL_IMPORTER_DEVELOPMENT.md)
-4. Report bugs or request features on the [main ncSender repository](https://github.com/siganberg/ncSender/issues)
+3. Review the [Tool Importer Development Guide](https://github.com/cotepat/ncSender/blob/kilroy/docs/TOOL_IMPORTER_DEVELOPMENT.md)
+4. Report bugs or request features on the [plugin repository](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/issues)
 
