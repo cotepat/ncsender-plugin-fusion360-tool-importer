@@ -1,0 +1,78 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Validate manifest.json
+        run: |
+          echo "Validating manifest.json..."
+          node -e "
+            const manifest = require('./manifest.json');
+            const required = ['id', 'name', 'version', 'author', 'description', 'entry', 'category'];
+            const missing = required.filter(field => !manifest[field]);
+            if (missing.length > 0) {
+              console.error('Missing required fields:', missing);
+              process.exit(1);
+            }
+            if (manifest.category !== 'tool-importer') {
+              console.error('Invalid category. Expected: tool-importer');
+              process.exit(1);
+            }
+            console.log('✓ Manifest is valid');
+          "
+
+      - name: Validate index.js syntax
+        run: |
+          echo "Validating index.js syntax..."
+          node -c index.js
+          echo "✓ Syntax is valid"
+
+      - name: Check required exports
+        run: |
+          echo "Checking for required exports..."
+          if ! grep -q "export function onLoad" index.js; then
+            echo "Error: Missing onLoad export"
+            exit 1
+          fi
+          if ! grep -q "export function onUnload" index.js; then
+            echo "Error: Missing onUnload export"
+            exit 1
+          fi
+          echo "✓ Required exports found"
+
+      - name: Test package creation
+        run: |
+          chmod +x .scripts/package.sh
+          .scripts/package.sh
+          ls -lh *.zip
+
+      - name: Validate package contents
+        run: |
+          PLUGIN_ID=$(node -p "require('./manifest.json').id")
+          VERSION=$(node -p "require('./manifest.json').version")
+          PACKAGE_NAME="${PLUGIN_ID}-v${VERSION}.zip"
+          
+          echo "Checking package contents..."
+          unzip -l "${PACKAGE_NAME}"
+          
+          # Verify required files are in the package
+          unzip -l "${PACKAGE_NAME}" | grep -q "${PLUGIN_ID}/manifest.json" || exit 1
+          unzip -l "${PACKAGE_NAME}" | grep -q "${PLUGIN_ID}/index.js" || exit 1
+          
+          echo "✓ Package is valid"
+

@@ -1,0 +1,17 @@
+# Logo Placeholder
+
+This plugin needs a logo.png file (256x256 px recommended).
+
+The logo should represent:
+- Fusion 360 branding/colors (orange/blue)
+- Tool library import concept
+- ncSender integration
+
+Until a logo is created, the plugin will use ncSender's default plugin icon.
+
+To add a logo:
+1. Create a 256x256 PNG file
+2. Name it `logo.png`
+3. Place it in this directory (replace this placeholder file)
+4. Update the release notes
+
