@@ -20,6 +20,16 @@ const DEFAULT_SETTINGS = {
 };
 
 /**
+ * Pad a number with leading zeros
+ * @param {number} num - The number to pad
+ * @param {number} width - The desired width (default: 3)
+ * @returns {string} - The padded number as a string
+ */
+function padNumber(num, width = 3) {
+  return String(num).padStart(width, '0');
+}
+
+/**
  * Convert Fusion 360 tool to ncSender tool format
  */
 function convertFusionToolToNcSender(fusionTool, settings, existingTools) {
@@ -57,7 +67,7 @@ function convertFusionToolToNcSender(fusionTool, settings, existingTools) {
   if (!description || description.trim() === '') {
     const fusionNumber = fusionTool['post-process']?.number;
     if (fusionNumber !== undefined && fusionNumber !== null) {
-      description = `Tool ${fusionNumber}`;
+      description = `Tool ${padNumber(fusionNumber)}`;
     } else {
       description = `${fusionType || 'Unknown'} - ${diameter}mm`;
     }
@@ -67,9 +77,10 @@ function convertFusionToolToNcSender(fusionTool, settings, existingTools) {
   if (settings.includeFusionToolNumber) {
     const fusionNumber = fusionTool['post-process']?.number;
     if (fusionNumber !== undefined && fusionNumber !== null) {
+      const paddedNumber = padNumber(fusionNumber);
       // Only add prefix if not already in description
-      if (!description.startsWith(`${fusionNumber} -`)) {
-        description = `${fusionNumber} - ${description}`;
+      if (!description.startsWith(`${paddedNumber} -`) && !description.startsWith(`${fusionNumber} -`)) {
+        description = `${paddedNumber} - ${description}`;
       }
     }
   }
