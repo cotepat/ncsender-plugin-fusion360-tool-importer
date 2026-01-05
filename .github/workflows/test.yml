@@ -63,8 +63,8 @@ jobs:
 
       - name: Validate package contents
         run: |
-          PLUGIN_ID=$(node -p "require('./manifest.json').id")
-          VERSION=$(node -p "require('./manifest.json').version")
+          PLUGIN_ID=$(node --input-type=module -e "import manifest from './manifest.json' assert { type: 'json' }; console.log(manifest.id)")
+          VERSION=$(node --input-type=module -e "import manifest from './manifest.json' assert { type: 'json' }; console.log(manifest.version)")
           PACKAGE_NAME="${PLUGIN_ID}-v${VERSION}.zip"
           
           echo "Checking package contents..."

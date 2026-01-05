@@ -18,7 +18,7 @@ jobs:
       - name: Get version from manifest
         id: get_version
         run: |
-          VERSION=$(node -p "require('./manifest.json').version")
+          VERSION=$(node --input-type=module -e "import manifest from './manifest.json' assert { type: 'json' }; console.log(manifest.version)")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Version: ${VERSION}"
 
