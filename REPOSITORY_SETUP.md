@@ -180,5 +180,6 @@ Add repository topics for discoverability:
 
 - [Rapid Change Solo Plugin](https://github.com/siganberg/ncsender-plugin-rapidchangesolo) - Reference structure
 - [ncSender Main Repository](https://github.com/siganberg/ncSender)
-- [Tool Importer Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/TOOL_IMPORTER_DEVELOPMENT.md)
+- [Plugin Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_DEVELOPMENT.md)
+- [Plugin Architecture](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_ARCHITECTURE.md)
 

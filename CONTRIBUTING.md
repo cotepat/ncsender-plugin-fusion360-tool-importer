@@ -28,9 +28,9 @@ Thank you for your interest in contributing to this plugin!
 
 This plugin follows the ncSender plugin architecture. Key resources:
 
-- [Tool Importer Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/TOOL_IMPORTER_DEVELOPMENT.md)
 - [Plugin Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_DEVELOPMENT.md)
 - [Plugin Architecture](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_ARCHITECTURE.md)
+- [Plugin API Reference](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_API.md)
 
 ## Testing
 

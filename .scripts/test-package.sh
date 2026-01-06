@@ -23,7 +23,7 @@ echo "2. Extract the zip file"
 echo "3. Restart ncSender"
 echo ""
 echo "Plugin directory locations:"
-echo "  macOS: ~/Library/Application Support/ncsender/plugins/"
+echo "  macOS: ~/Library/Application Support/ncSender/plugins/"
 echo "  Windows: %APPDATA%\\ncSender\\plugins\\"
 echo "  Linux: ~/.config/ncSender/plugins/"
 

@@ -1,11 +1,11 @@
 {
   "id": "com.ncsender.fusion360-import",
   "name": "Fusion 360 Tool Library Import",
-  "version": "1.1.1",
+  "version": "1.1.0",
   "author": "ncSender",
   "description": "Import tool libraries from Fusion 360",
   "entry": "index.js",
-  "category": "tool-importer",
+  "category": "utility",
   "events": [],
   "permissions": []
 }
