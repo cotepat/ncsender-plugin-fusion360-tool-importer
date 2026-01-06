@@ -7,14 +7,14 @@ Once published, you'll be able to install directly from ncSender's Plugin Manage
 
 ### Option 2: Manual Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/YOUR_USERNAME/ncsender-plugin-fusion360-tool-importer/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/releases)
 2. Locate your ncSender plugins directory:
    - **macOS**: `~/Library/Application Support/ncSender/plugins/`
    - **Windows**: `%APPDATA%\ncSender\plugins\`
    - **Linux**: `~/.config/ncSender/plugins/`
 3. Extract the downloaded ZIP file into the plugins directory
 4. Restart ncSender
-5. Access via **Tools → Fusion 360 Tool Importer** menu
+5. Access via **Plugins → Fusion 360 Tool Importer** menu
 
 ## For Developers: Setting Up for Development
 
@@ -22,7 +22,7 @@ Once published, you'll be able to install directly from ncSender's Plugin Manage
 
 ```bash
 cd ~/GitHub
-git clone https://github.com/YOUR_USERNAME/ncsender-plugin-fusion360-tool-importer.git
+git clone https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer.git
 cd ncsender-plugin-fusion360-tool-importer
 ```
 
@@ -75,7 +75,7 @@ The GitHub Action will automatically:
 ### Importing into ncSender
 
 1. Open ncSender
-2. Select **Tools → Fusion 360 Tool Importer** from the menu
+2. Select **Plugins → Fusion 360 Tool Importer** from the menu
 3. Click **Select Fusion 360 JSON File**
 4. Choose your exported JSON file
 5. Configure import options:
@@ -122,7 +122,7 @@ Fusion 360's `assemblyGaugeLength` is for CAM simulation only and does not repre
 **Update Workflow**:
 1. Modify tools in Fusion 360
 2. Re-export as JSON
-3. Open **Tools → Fusion 360 Tool Importer**
+3. Open **Plugins → Fusion 360 Tool Importer**
 4. Select file and review changes
 5. Import new/modified tools
 
@@ -162,12 +162,12 @@ If a tool has `turret = 0` in Fusion 360, it will be imported without an ATC slo
 
 **Can't find the importer:**
 - Plugin appears in **Tools** menu, not in the Tools tab import dropdown
-- Look for **Tools → Fusion 360 Tool Importer** in the menu bar
+- Look for **Plugins → Fusion 360 Tool Importer** in the menu bar
 
 ## Support
 
 - **Documentation**: See [README.md](README.md) for full documentation
-- **Issues**: Report bugs on [GitHub Issues](https://github.com/YOUR_USERNAME/ncsender-plugin-fusion360-tool-importer/issues)
+- **Issues**: Report bugs on [GitHub Issues](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/issues)
 - **ncSender Docs**: [Plugin Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_DEVELOPMENT.md)
 
 ## Contributing

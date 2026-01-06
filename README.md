@@ -10,7 +10,7 @@
 
 ## Installation
 
-Install this plugin in ncSender through the Plugins interface. The plugin adds a menu item under **Tools → Fusion 360 Tool Importer**.
+Install this plugin in ncSender through the Plugins interface. The plugin adds a menu item under **Plugins → Fusion 360 Tool Importer**.
 
 ## Features
 
@@ -91,7 +91,7 @@ The plugin automatically maps Fusion 360 tool types to ncSender tool types:
 ### Importing Tools
 
 1. In Fusion 360, export your tool library as JSON
-2. Open ncSender and select **Tools → Fusion 360 Tool Importer** from the menu
+2. Open ncSender and select **Plugins → Fusion 360 Tool Importer** from the menu
 3. Click **Select Fusion 360 JSON File** and choose your exported file
 4. Configure import options:
    - **Include Fusion 360 tool number in description**: Prefixes descriptions with padded tool numbers (001, 010, etc.)
@@ -148,5 +148,4 @@ If you encounter issues:
 1. Check the ncSender console for error messages
 2. Verify your Fusion 360 JSON export is valid
 3. Check the import preview for any skipped tools and error messages
-4. Report bugs or request features on the [main ncSender repository](https://github.com/siganberg/ncSender/issues)
-
+4. Report bugs or request features on this plugin repository

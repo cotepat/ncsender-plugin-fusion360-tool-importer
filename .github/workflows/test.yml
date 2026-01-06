@@ -29,8 +29,8 @@ jobs:
               console.error('Missing required fields:', missing);
               process.exit(1);
             }
-            if (manifest.category !== 'tool-importer') {
-              console.error('Invalid category. Expected: tool-importer');
+            if (manifest.category !== 'utility') {
+              console.error('Invalid category. Expected: utility);
               process.exit(1);
             }
             console.log('✓ Manifest is valid');

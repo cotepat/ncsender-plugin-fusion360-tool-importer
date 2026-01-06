@@ -6,7 +6,7 @@ Thank you for your interest in contributing to this plugin!
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/ncsender-plugin-fusion360-tool-importer.git
+   git clone https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer.git
    cd ncsender-plugin-fusion360-tool-importer
    ```
 
@@ -59,7 +59,7 @@ Before submitting a pull request:
 
 ## Reporting Bugs
 
-Please report bugs on the [main ncSender repository](https://github.com/siganberg/ncSender/issues) or this plugin's issues page.
+Please report bugs on this plugin's issues page.
 
 Include:
 - ncSender version

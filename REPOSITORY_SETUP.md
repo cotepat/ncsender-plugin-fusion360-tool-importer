@@ -16,8 +16,8 @@ This document explains how to set up this repository on GitHub and configure aut
 ```bash
 cd /Users/patricecote/GitHub/ncsender-plugin-fusion360-tool-importer
 
-# Add remote origin (replace YOUR_USERNAME with your GitHub username)
-git remote add origin https://github.com/YOUR_USERNAME/ncsender-plugin-fusion360-tool-importer.git
+# Add remote origin (replace cotepat with your GitHub username)
+git remote add origin https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer.git
 
 # Push to GitHub
 git branch -M main
@@ -178,7 +178,6 @@ Add repository topics for discoverability:
 
 ## Related Documentation
 
-- [Rapid Change Solo Plugin](https://github.com/siganberg/ncsender-plugin-rapidchangesolo) - Reference structure
 - [ncSender Main Repository](https://github.com/siganberg/ncSender)
 - [Plugin Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_DEVELOPMENT.md)
 - [Plugin Architecture](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_ARCHITECTURE.md)
