@@ -17,7 +17,7 @@ export function onLoad(ctx) {
   // Register tool menu item
   ctx.registerToolMenu('Fusion 360 Tool Importer', () => {
     showImportDialog();
-  });
+  }, { icon: 'logo.png' });
   
   ctx.log('Fusion 360 Tool Importer loaded');
 }
