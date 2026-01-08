@@ -21,8 +21,7 @@ export function showImportDialog() {
   const settings = pluginContext.getSettings();
   const defaultSettings = {
     includeFusionToolNumber: settings.includeFusionToolNumber !== undefined ? settings.includeFusionToolNumber : true,
-    preserveToolNumber: settings.preserveToolNumber !== undefined ? settings.preserveToolNumber : false,
-    enableToolNumberTranslation: settings.enableToolNumberTranslation !== undefined ? settings.enableToolNumberTranslation : true
+    preserveToolNumber: settings.preserveToolNumber !== undefined ? settings.preserveToolNumber : false
   };
   
   const html = `
@@ -294,13 +293,7 @@ export function showImportDialog() {
         </div>
         <div class="fusion-config-item">
           <input type="checkbox" id="preserveToolNumber" ${defaultSettings.preserveToolNumber ? 'checked' : ''}>
-          <label for="preserveToolNumber">Do not overwrite ATC Tool Number (keep existing)</label>
-        </div>
-        
-        <h3 style="margin-top: 20px; margin-bottom: 12px; font-size: 0.95rem; color: var(--color-text-primary);">G-Code Translation</h3>
-        <div class="fusion-config-item">
-          <input type="checkbox" id="enableToolNumberTranslation" ${defaultSettings.enableToolNumberTranslation ? 'checked' : ''}>
-          <label for="enableToolNumberTranslation"><strong>Enable tool number translation</strong> (T84→T1) when loading G-code</label>
+          <label for="preserveToolNumber">Do not overwrite ncSender Tool Number with Fusion 360 turret number (keep existing)</label>
         </div>
       </div>
       
@@ -397,8 +390,7 @@ export function showImportDialog() {
         let comparison = [];
         let settings = {
           includeFusionToolNumber: ${defaultSettings.includeFusionToolNumber},
-          preserveToolNumber: ${defaultSettings.preserveToolNumber},
-          enableToolNumberTranslation: ${defaultSettings.enableToolNumberTranslation}
+          preserveToolNumber: ${defaultSettings.preserveToolNumber}
         };
         
         loadExistingTools();
@@ -607,11 +599,6 @@ export function showImportDialog() {
           settings.preserveToolNumber = event.target.checked;
           await saveSettings();
           rebuildComparison();
-        };
-        
-        document.getElementById('enableToolNumberTranslation').onchange = async function(event) {
-          settings.enableToolNumberTranslation = event.target.checked;
-          await saveSettings();
         };
         
         async function saveSettings() {

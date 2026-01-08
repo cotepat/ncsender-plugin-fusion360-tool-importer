@@ -27,7 +27,10 @@ export function registerHandler(ctx) {
     // Check if translation is enabled (default to true)
     const enableTranslation = settings.enableToolNumberTranslation !== undefined ? settings.enableToolNumberTranslation : true;
     
+    ctx.log(`Tool number translation enabled: ${enableTranslation}`);
+    
     if (!enableTranslation) {
+      ctx.log('Tool number translation is disabled - loading original G-code');
       return content;
     }
     
@@ -51,15 +54,10 @@ export function registerHandler(ctx) {
     
     ctx.log('Showing dialog to user...');
     
-    // Show status dialog with three options
+    // Show status dialog with two options
     const userChoice = await showStatusDialog(context.filename, toolChanges, status, settings);
     
     ctx.log(`User choice received: "${userChoice}" (type: ${typeof userChoice})`);
-    
-    if (userChoice === 'cancel') {
-      ctx.log('Cancelling G-code load');
-      throw new Error('G-code loading cancelled by user');
-    }
     
     if (userChoice === 'bypass') {
       ctx.log('Tool mapping bypassed - loading original G-code');
@@ -158,21 +156,21 @@ async function showStatusDialog(filename, toolChanges, status, settings) {
         bgColor: 'rgba(220, 53, 69, 0.1)',
         icon: '🔴',
         title: 'Tools Not Found in Library',
-        message: `${toolChanges.unknownTools.length} tool(s) from G-code are not in your ncSender library. If you proceed with "Map Tools", only tools that exist will be mapped - unknown tools will remain as-is in the G-code.`
+        message: `${toolChanges.unknownTools.length} tool(s) are not in your ncSender library. If you proceed with "Map Tools", tools that exist will be mapped - unknown tools will remain as-is.`
       },
       yellow: {
         color: '#ffc107',
         bgColor: 'rgba(255, 193, 7, 0.1)',
         icon: '🟡',
         title: 'Manual Tool Changes Required',
-        message: `${toolChanges.notInMagazine.length} tool(s) exist in your library but are not assigned to ATC pockets. These will require manual tool changes during operation.`
+        message: `${toolChanges.notInMagazine.length} tool(s) are in ncSender library but not in magazine. These will require manual tool changes.`
       },
       green: {
         color: '#28a745',
         bgColor: 'rgba(40, 167, 69, 0.1)',
         icon: '🟢',
         title: 'All Tools Ready for ATC',
-        message: 'All tools are in your library and assigned to ATC pockets. Tool numbers will be automatically translated to your magazine layout.'
+        message: 'All tools are in ncSender library and assigned to ATC magazine. Original tool numbers will be mapped to ncSender tools.'
       }
     };
     
@@ -257,27 +255,13 @@ async function showStatusDialog(filename, toolChanges, status, settings) {
           text-transform: uppercase;
         }
         
-        .tools-section {
-          background: var(--color-surface-muted, #1a1a1a);
-          border-radius: 8px;
-          padding: 16px;
-          margin-bottom: 16px;
-        }
-        
-        .section-title {
-          font-weight: 600;
-          margin-bottom: 12px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        
         .tool-list {
           display: flex;
           flex-direction: column;
           gap: 8px;
-          max-height: 200px;
+          max-height: 250px;
           overflow-y: auto;
+          margin-bottom: 20px;
         }
         
         .tool-item {
@@ -375,7 +359,6 @@ async function showStatusDialog(filename, toolChanges, status, settings) {
       
       <div class="status-container">
         <div class="status-header">
-          <h2>Tool Translation Status</h2>
           <div class="status-filename">${filename || 'G-Code File'}</div>
           <div class="status-badge">
             <span>${config.icon}</span>
@@ -404,62 +387,31 @@ async function showStatusDialog(filename, toolChanges, status, settings) {
           </div>
         </div>
         
-        ${toolChanges.inMagazine.length > 0 ? `
-        <div class="tools-section">
-          <div class="section-title">
-            <span>🟢</span>
-            <span>In ATC Magazine (${toolChanges.inMagazine.length})</span>
-          </div>
-          <div class="tool-list">
-            ${toolChanges.inMagazine.map(t => `
-              <div class="tool-item green">
-                <div class="tool-number">T${t.toolNumber}</div>
-                <div class="tool-name">${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</div>
-                <div class="tool-badge green">→ T${t.pocketNumber}</div>
-              </div>
-            `).join('')}
-          </div>
+        <div class="tool-list">
+          ${toolChanges.inMagazine.map(t => `
+            <div class="tool-item green">
+              <div class="tool-number">T${t.toolNumber}</div>
+              <div class="tool-name">${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</div>
+              <div class="tool-badge green">→ T${t.pocketNumber}</div>
+            </div>
+          `).join('')}
+          ${toolChanges.notInMagazine.map(t => `
+            <div class="tool-item yellow">
+              <div class="tool-number">T${t.toolNumber}</div>
+              <div class="tool-name">${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</div>
+              <div class="tool-badge yellow">MANUAL</div>
+            </div>
+          `).join('')}
+          ${toolChanges.unknownTools.map(t => `
+            <div class="tool-item red">
+              <div class="tool-number">T${t.toolNumber}</div>
+              <div class="tool-name">Unknown Tool</div>
+              <div class="tool-badge red">NOT IN LIBRARY</div>
+            </div>
+          `).join('')}
         </div>
-        ` : ''}
-        
-        ${toolChanges.notInMagazine.length > 0 ? `
-        <div class="tools-section">
-          <div class="section-title">
-            <span>🟡</span>
-            <span>Manual Change Required (${toolChanges.notInMagazine.length})</span>
-          </div>
-          <div class="tool-list">
-            ${toolChanges.notInMagazine.map(t => `
-              <div class="tool-item yellow">
-                <div class="tool-number">T${t.toolNumber}</div>
-                <div class="tool-name">${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</div>
-                <div class="tool-badge yellow">MANUAL</div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-        ` : ''}
-        
-        ${toolChanges.unknownTools.length > 0 ? `
-        <div class="tools-section">
-          <div class="section-title">
-            <span>🔴</span>
-            <span>Not in Library (${toolChanges.unknownTools.length})</span>
-          </div>
-          <div class="tool-list">
-            ${toolChanges.unknownTools.map(t => `
-              <div class="tool-item red">
-                <div class="tool-number">T${t.toolNumber}</div>
-                <div class="tool-name">Unknown Tool</div>
-                <div class="tool-badge red">IMPORT REQUIRED</div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-        ` : ''}
         
         <div class="actions">
-          <button id="cancelBtn" class="btn btn-secondary">Cancel</button>
           <button id="bypassBtn" class="btn btn-secondary">Bypass Mapping</button>
           <button id="mapBtn" class="btn ${status === 'green' ? 'btn-success' : (status === 'yellow' ? 'btn-warning' : 'btn-primary')}">
             Map Tools
@@ -469,13 +421,6 @@ async function showStatusDialog(filename, toolChanges, status, settings) {
       
       <script>
         (function() {
-          document.getElementById('cancelBtn').addEventListener('click', () => {
-            window.parent.postMessage({ 
-              type: 'close-plugin-dialog',
-              data: { action: 'cancel' }
-            }, '*');
-          });
-          
           document.getElementById('bypassBtn').addEventListener('click', () => {
             window.parent.postMessage({ 
               type: 'close-plugin-dialog',
@@ -494,20 +439,20 @@ async function showStatusDialog(filename, toolChanges, status, settings) {
     `;
     
     pluginContext.log('Calling showDialog...');
-    const response = await pluginContext.showDialog('Tool Translation Status', html, {
+    const response = await pluginContext.showDialog('Fusion 360 Tool Importer Plugin (Tool Mapping Summary)', html, {
       closable: false
     });
     
     pluginContext.log(`Dialog resolved with response:`, JSON.stringify(response));
     
-    // Extract action from response
+    // Extract action from response (default to 'bypass' if no response)
     if (response && response.action) {
       pluginContext.log(`Returning action: ${response.action}`);
       return response.action;
     }
     
-    pluginContext.log('No action in response, returning cancel');
-    return 'cancel';
+    pluginContext.log('No action in response, defaulting to bypass');
+    return 'bypass';
 }
 
 /**
@@ -524,48 +469,25 @@ function performTranslation(lines, toolChanges, settings, ctx) {
   let translationCount = 0;
   let commentTranslationCount = 0;
   
-  // Helper function to find M6 tool number near a line
-  const findNearbyM6Tool = (lineIndex) => {
-    // Check 3 lines before and 3 lines after for M6 command
-    for (let offset = -3; offset <= 3; offset++) {
-      const checkIndex = lineIndex + offset;
-      if (checkIndex >= 0 && checkIndex < lines.length) {
-        const checkLine = lines[checkIndex];
-        if (/M0?6/i.test(checkLine)) {
-          const toolMatch = checkLine.match(/T(\d+)/i);
-          if (toolMatch) {
-            return parseInt(toolMatch[1], 10);
-          }
-        }
-      }
-    }
-    return null;
-  };
-  
   const translatedLines = lines.map((line, index) => {
     if (!line.trim()) return line;
     
     const trimmed = line.trim();
     
-    // Handle comments - only translate if they refer to an M6 line nearby
+    // Handle comments - translate all T## in comments and preserve original
     if (trimmed.startsWith('(') || trimmed.startsWith(';')) {
       const toolMatch = line.match(/T(\d+)/i);
       if (toolMatch) {
-        const commentToolNumber = parseInt(toolMatch[1], 10);
-        const nearbyM6Tool = findNearbyM6Tool(index);
+        const toolNumber = parseInt(toolMatch[1], 10);
+        const pocketNumber = translationMap[toolNumber];
         
-        // Only translate if comment's tool matches a nearby M6 command
-        if (nearbyM6Tool === commentToolNumber) {
-          const pocketNumber = translationMap[commentToolNumber];
-          
-          if (pocketNumber !== undefined) {
-            // Replace T## with T# [Fusion: tool ##]
-            const translatedLine = line.replace(/T(\d+)/i, (match, num) => {
-              return `T${pocketNumber} [Fusion: tool ${num}]`;
-            });
-            commentTranslationCount++;
-            return translatedLine;
-          }
+        if (pocketNumber !== undefined) {
+          // Replace T## with T# [Fusion: tool ##]
+          const translatedLine = line.replace(/T(\d+)/i, (match, num) => {
+            return `T${pocketNumber} [Fusion: tool ${num}]`;
+          });
+          commentTranslationCount++;
+          return translatedLine;
         }
       }
       return line;
