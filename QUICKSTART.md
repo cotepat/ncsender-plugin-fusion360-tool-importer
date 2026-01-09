@@ -52,8 +52,8 @@ git commit -m "Description of changes"
 git push
 
 # Create a release tag (triggers automated release)
-git tag -a v2.0.0 -m "Release v2.0.0"
-git push origin v2.0.0
+git tag -a v2.0.1 -m "Release v2.0.1"
+git push origin v2.0.1
 ```
 
 The GitHub Action will automatically:

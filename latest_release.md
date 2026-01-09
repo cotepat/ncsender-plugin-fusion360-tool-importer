@@ -1,6 +1,6 @@
-# Fusion 360 Tool Library Import v2.0.0
+# Fusion 360 Tool Library Import v2.0.1
 
-## Version 2.0.0 - G-Code Translation & Tool Mapping (Major Feature Release)
+## Version 2.0.1 - G-Code Translation & Tool Mapping (Major Feature Release)
 
 ### 🎉 Major Changes
 
@@ -53,7 +53,7 @@ Added support for many more Fusion 360 tool types:
 
 ### 📍 How to Access
 
-**Current (v2.0.0)**: **Plugins → Fusion 360 Tool Importer**
+**Current (v2.0.1)**: **Plugins → Fusion 360 Tool Importer**
 
 ### 🐛 Bug Fixes
 
