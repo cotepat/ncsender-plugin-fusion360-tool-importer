@@ -117,8 +117,10 @@ function registerPluginSettings(ctx) {
           <label for="enableToolNumberTranslation" class="setting-label">
             <strong>Enable Tool Number Translation</strong>
             <div class="description">
-              Automatically translate Fusion 360 tool numbers (e.g., T84) to ncSender ATC pocket numbers (e.g., T1) when loading G-code files.
-              This requires tools to be imported from Fusion 360 and assigned to ATC pockets.
+              Automatically map Fusion 360 tool numbers (e.g., T84) to ncSender ATC pockets (e.g., T1) when loading G-code files (e.g. T84 is in ATC pocket 1).
+              This addresses a limitation of ncSender which ties tool numbers to ATC pockets (T1 is always in ATC pocket 1).
+              This option will translate all tool numbers in the G-code file to the corresponding ncSender ATC pocket number.
+              If you want to use the original tool number (e.g. T84 instead of T1), you can disable this option.
             </div>
           </label>
         </div>
