@@ -34,7 +34,7 @@ This plugin bridges the gap between Fusion 360 and ncSender by:
 
 ## 🚀 Installation
 
-1. **Download** the latest release: [`com.ncsender.fusion360-import-v2.0.0.zip`](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/releases/latest)
+1. **Download** the latest release: [`com.ncsender.fusion360-import-v2.0.1.zip`](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/releases/latest)
 2. **Open ncSender** → Navigate to settings (gear icon), then **Plugins** tab
 3. **Click** "Install Plugin" button
 4. **Select** the downloaded zip file
@@ -99,5 +99,5 @@ The plugin uses color-coded status:
 
 ---
 
-**Version**: 2.0.0  
+**Version**: 2.0.1  
 **Repository**: [github.com/cotepat/ncsender-plugin-fusion360-tool-importer](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer)

@@ -88,7 +88,10 @@ export function registerHandler(ctx) {
       return content;
     }
     
-    // userChoice === 'map' - perform translation
+    // userChoice === 'map' - sync tool library with mappings and perform translation
+    ctx.log('Syncing tool library with mappings...');
+    await syncToolLibraryWithMappings(currentToolChanges, ctx);
+    
     ctx.log('Starting tool translation...');
     const translatedContent = performTranslation(lines, currentToolChanges, settings, ctx);
     
@@ -745,28 +748,7 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
                 throw new Error(\`Failed to save plugin settings: HTTP \${saveResponse.status}: \${errorText}\`);
               }
               
-              // 4. Update the tool library if tool exists
-              if (toolInfo) {
-                console.log(\`[Mapping] Updating tool library for tool ID \${toolNumberToMap}...\`);
-                const toolUpdateResponse = await fetch('/api/tools/' + toolNumberToMap, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    ...toolInfo,
-                    toolNumber: pocketNumber
-                  })
-                });
-                console.log('[Mapping] Tool library update response:', toolUpdateResponse.status);
-                
-                if (!toolUpdateResponse.ok) {
-                  console.warn(\`[Mapping] Warning: Failed to update tool library for tool \${toolNumberToMap}\`);
-                  // Don't fail the whole operation if library update fails
-                }
-              } else {
-                console.log(\`[Mapping] Tool \${toolNumberToMap} not in library, skipping library update\`);
-              }
-              
-              console.log('[Mapping] All updates complete');
+              console.log('[Mapping] Manual mapping saved (library will sync when "Map Tools" is clicked)');
               
             } catch (error) {
               console.error('[Mapping] Error:', error);
@@ -834,6 +816,68 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
     
     pluginContext.log('No action in response, defaulting to bypass');
     return 'bypass';
+}
+
+/**
+ * Sync tool library with current mappings before translation
+ */
+async function syncToolLibraryWithMappings(toolChanges, ctx) {
+  try {
+    // Dynamically import Node.js modules if needed
+    if (!fs) {
+      const modules = await import('fs');
+      fs = modules.default;
+      const pathModule = await import('path');
+      path = pathModule.default;
+      const osModule = await import('os');
+      os = osModule.default;
+    }
+    
+    const homeDir = os.homedir();
+    const dataDir = path.join(homeDir, 'Library', 'Application Support', 'ncSender');
+    const toolsPath = path.join(dataDir, 'tools.json');
+    
+    if (!fs.existsSync(toolsPath)) {
+      ctx.log('Tools file does not exist, skipping library sync');
+      return;
+    }
+    
+    // Load current library
+    const toolsData = fs.readFileSync(toolsPath, 'utf8');
+    const allTools = JSON.parse(toolsData);
+    
+    if (!Array.isArray(allTools)) {
+      ctx.log('Invalid tools data, skipping library sync');
+      return;
+    }
+    
+    // Update tool numbers based on current mappings (from inMagazine)
+    let updateCount = 0;
+    toolChanges.inMagazine.forEach(toolData => {
+      const toolIndex = allTools.findIndex(t => t.id === toolData.toolNumber);
+      if (toolIndex >= 0) {
+        const oldPocket = allTools[toolIndex].toolNumber;
+        const newPocket = toolData.pocketNumber;
+        
+        if (oldPocket !== newPocket) {
+          allTools[toolIndex].toolNumber = newPocket;
+          ctx.log(`  Updated library: T${toolData.toolNumber} → pocket ${newPocket}`);
+          updateCount++;
+        }
+      }
+    });
+    
+    if (updateCount > 0) {
+      // Save updated library
+      fs.writeFileSync(toolsPath, JSON.stringify(allTools, null, 2), 'utf8');
+      ctx.log(`✓ Synced ${updateCount} tool(s) in library`);
+    } else {
+      ctx.log('No library updates needed');
+    }
+  } catch (error) {
+    ctx.log('Error syncing tool library:', error.message);
+    // Don't fail the whole operation if library sync fails
+  }
 }
 
 /**

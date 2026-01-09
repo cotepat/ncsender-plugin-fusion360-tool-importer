@@ -5,7 +5,7 @@
  * 1. Import tool libraries from Fusion 360 JSON exports
  * 2. Translate Fusion tool numbers to ncSender ATC pocket numbers
  * 
- * Version: 2.0.0
+ * Version: 2.0.1
  */
 
 import * as toolImporter from './tool-importer.js';
@@ -30,7 +30,7 @@ export function onLoad(ctx) {
   // Register plugin settings UI
   registerPluginSettings(ctx);
   
-  ctx.log('Fusion 360 Tool Importer & Translator v2.0.0 loaded');
+  ctx.log('Fusion 360 Tool Importer & Translator v2.0.1 loaded');
 }
 
 /**
