@@ -126,6 +126,7 @@ function parseToolChanges(lines, toolLibrary, manualMappings = {}) {
         seenTools.add(toolNumber);
         
         // Check for manual mapping first
+        const hasManualMapping = manualMappings.hasOwnProperty(toolNumber);
         const manualPocketNumber = manualMappings[toolNumber];
         
         const toolInfo = toolLibrary[toolNumber];
@@ -133,16 +134,24 @@ function parseToolChanges(lines, toolLibrary, manualMappings = {}) {
           line: index + 1,
           toolNumber: toolNumber,
           toolInfo: toolInfo,
-          manualMapping: manualPocketNumber !== undefined
+          manualMapping: hasManualMapping
         };
         
         allTools.push(toolData);
         
-        // If manually mapped, treat as in magazine
-        if (manualPocketNumber !== undefined) {
-          pluginContext.log(`[Parse] T${toolNumber} manually mapped to pocket ${manualPocketNumber}`);
-          toolData.pocketNumber = manualPocketNumber;
-          inMagazine.push(toolData);
+        // If manually mapped, use the manual mapping (even if null)
+        if (hasManualMapping) {
+          if (manualPocketNumber !== null) {
+            pluginContext.log(`[Parse] T${toolNumber} manually mapped to pocket ${manualPocketNumber}`);
+            toolData.pocketNumber = manualPocketNumber;
+            inMagazine.push(toolData);
+          } else {
+            pluginContext.log(`[Parse] T${toolNumber} manually set to not in magazine`);
+            if (toolInfo) {
+              inLibrary.push(toolData);
+            }
+            notInMagazine.push(toolData);
+          }
         } else if (toolInfo) {
           inLibrary.push(toolData);
           
@@ -604,7 +613,7 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
             <div class="tool-item yellow">
               <div class="tool-number">T${t.toolNumber}</div>
               <div class="tool-name">${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</div>
-              <button class="tool-map-btn" data-tool="${t.toolNumber}" data-current-pocket="">Map</button>
+              <button class="tool-map-btn ${t.manualMapping ? 'mapped' : ''}" data-tool="${t.toolNumber}" data-current-pocket="">${t.manualMapping ? 'Manual' : 'Map'}</button>
             </div>
           `).join('')}
           ${toolChanges.unknownTools.map(t => `
@@ -725,13 +734,9 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
               if (manualMappings.hasOwnProperty('null')) delete manualMappings['null'];
               if (manualMappings.hasOwnProperty(null)) delete manualMappings[null];
               
-              // If pocketNumber is null, remove the mapping; otherwise, set it
-              if (pocketNumber === null) {
-                console.log(\`[Mapping] Removing manual mapping for tool \${toolNumberToMap}\`);
-                delete manualMappings[toolNumberToMap];
-              } else {
-                manualMappings[toolNumberToMap] = pocketNumber;
-              }
+              // Set the mapping (null means explicitly "not in magazine")
+              manualMappings[toolNumberToMap] = pocketNumber;
+              console.log(\`[Mapping] Set manual mapping for tool \${toolNumberToMap} to \${pocketNumber === null ? 'None' : pocketNumber}\`);
               console.log('[Mapping] Updated mappings:', manualMappings);
               
               // 3. Save plugin settings
@@ -851,8 +856,10 @@ async function syncToolLibraryWithMappings(toolChanges, ctx) {
       return;
     }
     
-    // Update tool numbers based on current mappings (from inMagazine)
+    // Update tool numbers based on current mappings
     let updateCount = 0;
+    
+    // Update tools that are in magazine
     toolChanges.inMagazine.forEach(toolData => {
       const toolIndex = allTools.findIndex(t => t.id === toolData.toolNumber);
       if (toolIndex >= 0) {
@@ -863,6 +870,22 @@ async function syncToolLibraryWithMappings(toolChanges, ctx) {
           allTools[toolIndex].toolNumber = newPocket;
           ctx.log(`  Updated library: T${toolData.toolNumber} → pocket ${newPocket}`);
           updateCount++;
+        }
+      }
+    });
+    
+    // Update tools that are manually set to not in magazine
+    toolChanges.notInMagazine.forEach(toolData => {
+      if (toolData.manualMapping) {
+        const toolIndex = allTools.findIndex(t => t.id === toolData.toolNumber);
+        if (toolIndex >= 0) {
+          const oldPocket = allTools[toolIndex].toolNumber;
+          
+          if (oldPocket !== null) {
+            allTools[toolIndex].toolNumber = null;
+            ctx.log(`  Updated library: T${toolData.toolNumber} → not in magazine`);
+            updateCount++;
+          }
         }
       }
     });
