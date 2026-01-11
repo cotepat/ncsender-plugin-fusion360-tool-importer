@@ -101,6 +101,9 @@ export function registerHandler(ctx) {
 
 /**
  * Parse tool changes from G-code lines
+ * 
+ * Note: manualMappings uses -1 as a sentinel value to indicate "not in magazine"
+ * (we can't use null because the API strips null values from JSON)
  */
 function parseToolChanges(lines, toolLibrary, manualMappings = {}) {
   const allTools = [];
@@ -139,9 +142,9 @@ function parseToolChanges(lines, toolLibrary, manualMappings = {}) {
         
         allTools.push(toolData);
         
-        // If manually mapped, use the manual mapping (even if null)
+        // If manually mapped, use the manual mapping (even if -1 for "not in magazine")
         if (hasManualMapping) {
-          if (manualPocketNumber !== null) {
+          if (manualPocketNumber !== -1) {
             pluginContext.log(`[Parse] T${toolNumber} manually mapped to pocket ${manualPocketNumber}`);
             toolData.pocketNumber = manualPocketNumber;
             inMagazine.push(toolData);
@@ -715,8 +718,9 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
             const toolInfo = currentToolInfo;
             
             // Handle "None (Not in magazine)" selection
-            const pocketNumber = selectedValue === '' ? null : parseInt(selectedValue, 10);
-            console.log(\`[Mapping] Confirm clicked: T\${toolNumberToMap} → \${pocketNumber === null ? 'None' : 'T' + pocketNumber}\`);
+            // Use -1 as sentinel value for "not in magazine" (null gets stripped by API)
+            const pocketNumber = selectedValue === '' ? -1 : parseInt(selectedValue, 10);
+            console.log(\`[Mapping] Confirm clicked: T\${toolNumberToMap} → \${pocketNumber === -1 ? 'None' : 'T' + pocketNumber}\`);
             
             hideMappingModal();
             
@@ -734,9 +738,9 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
               if (manualMappings.hasOwnProperty('null')) delete manualMappings['null'];
               if (manualMappings.hasOwnProperty(null)) delete manualMappings[null];
               
-              // Set the mapping (null means explicitly "not in magazine")
+              // Set the mapping (-1 means explicitly "not in magazine")
               manualMappings[toolNumberToMap] = pocketNumber;
-              console.log(\`[Mapping] Set manual mapping for tool \${toolNumberToMap} to \${pocketNumber === null ? 'None' : pocketNumber}\`);
+              console.log(\`[Mapping] Set manual mapping for tool \${toolNumberToMap} to \${pocketNumber === -1 ? 'None' : pocketNumber}\`);
               console.log('[Mapping] Updated mappings:', manualMappings);
               
               // 3. Save plugin settings
@@ -874,13 +878,14 @@ async function syncToolLibraryWithMappings(toolChanges, ctx) {
       }
     });
     
-    // Update tools that are manually set to not in magazine
+    // Update tools that are manually set to not in magazine (pocket = -1)
     toolChanges.notInMagazine.forEach(toolData => {
       if (toolData.manualMapping) {
         const toolIndex = allTools.findIndex(t => t.id === toolData.toolNumber);
         if (toolIndex >= 0) {
           const oldPocket = allTools[toolIndex].toolNumber;
           
+          // Set to null in library (not -1, since library uses null for "not in magazine")
           if (oldPocket !== null) {
             allTools[toolIndex].toolNumber = null;
             ctx.log(`  Updated library: T${toolData.toolNumber} → not in magazine`);

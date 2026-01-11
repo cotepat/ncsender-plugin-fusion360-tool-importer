@@ -1,6 +1,6 @@
 {
   "name": "ncsender-plugin-fusion360-tool-importer",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Import tool libraries from Fusion 360 into ncSender",
   "type": "module",
   "main": "index.js",
