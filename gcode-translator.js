@@ -436,6 +436,15 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
           background: rgba(40, 167, 69, 0.1) !important;
         }
         
+        .tool-map-btn.manual {
+          border-color: #ffc107 !important;
+          color: var(--color-text-primary, #e0e0e0) !important;
+        }
+        
+        .tool-map-btn.manual:hover {
+          background: rgba(255, 193, 7, 0.1) !important;
+        }
+        
         .mapping-modal {
           display: none;
           position: fixed;
@@ -616,7 +625,7 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
             <div class="tool-item yellow">
               <div class="tool-number">T${t.toolNumber}</div>
               <div class="tool-name">${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</div>
-              <button class="tool-map-btn ${t.manualMapping ? 'mapped' : ''}" data-tool="${t.toolNumber}" data-current-pocket="">${t.manualMapping ? 'Manual' : 'Map'}</button>
+              <button class="tool-map-btn ${t.manualMapping ? 'manual' : ''}" data-tool="${t.toolNumber}" data-current-pocket="">${t.manualMapping ? 'Manual' : 'Map'}</button>
             </div>
           `).join('')}
           ${toolChanges.unknownTools.map(t => `
