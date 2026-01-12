@@ -7,7 +7,6 @@
   "entry": "index.js",
   "icon": "logo.png",
   "category": "utility",
-  "events": [],
+  "events": ["onGcodeProgramLoad"],
   "permissions": []
 }
-

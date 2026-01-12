@@ -1,5 +1,3 @@
-##**THIS CURRENTLY DOES NOT WORK WITH OFFICIAL BRANCH OF ncSender, WAITING FOR THE DEVELOPER TO INTEGRATE REQUIRED CHANGE**##
-
 # Fusion 360 Tool Importer & Translator for ncSender
 
 A comprehensive ncSender plugin that seamlessly imports tool libraries from Fusion 360 and automatically translates G-code tool numbers to match your ncSender ATC configuration.
