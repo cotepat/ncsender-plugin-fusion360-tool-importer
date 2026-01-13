@@ -16,21 +16,29 @@ This plugin bridges the gap between Fusion 360 and ncSender by:
 
 ## ✨ Key Features
 
+### Tool Import
 - **Smart Import**: See NEW, MODIFIED, and UNCHANGED tools before importing
-- **Automatic Translation**: `T84 M6` in Fusion → `T6 M6` in ncSender (based on your mapping)
+- **Clipboard Import**: Copy/paste tool data directly from Fusion 360 (TSV format)
+- **File Import**: Import complete tool libraries from JSON exports
+- **Full Metadata**: Names, types, diameters, offsets, and specifications preserved
+
+### G-code Translation
+- **Automatic Remapping**: `T84 M6` in Fusion → `T6 M6` in ncSender (based on your slot assignments)
+- **Visual Slot Display**: See all ATC slots at a glance with color-coded status
+- **Interactive Mapping**: Click any tool to assign/reassign slots with dropdown selector
+- **Smart Swapping**: Automatically handles slot conflicts when reassigning tools
+- **Unknown Tool Handling**: Map tools that aren't in your library (temporary, session-only)
+
+### Status & Validation
 - **Visual Status**: 🟢 All ready / 🟡 Manual change needed / 🔴 Tools missing
-- **One-Click Remapping**: Assign any tool to any ATC pocket directly from the dialog
+- **Real-time Updates**: Dialog refreshes instantly after slot changes
 - **Magazine Size Detection**: Respects your ncSender ATC configuration
-- **Full Metadata**: Names, types, diameters, and all tool specifications preserved
 
 ![Tool Import Dialog](docs/screenshots/tool-import-dialog.png)
 *Tool import comparison*
 
 ![Translation Status Dialog](docs/screenshots/translation-dialog.png)
 *G-code translation status*
-
-![Tool Mapping Interface](docs/screenshots/mapping-interface.png)
-*Interactive tool mapping*
 
 ## 🚀 Installation
 
@@ -45,9 +53,22 @@ The plugin will appear in **Plugins → Fusion 360 Tool Importer** menu.
 
 ### Import Tool Library
 
+**Method 1: Clipboard (Quick)**
+1. In Fusion 360: Select tools in Tool Library → Right-click → Copy
+2. In ncSender: **Plugins → Fusion 360 Tool Importer**
+3. Click **Paste from Clipboard**
+4. Review and import
+
+![Copy from Fusion 360](docs/screenshots/fusion-copy-tools.png)
+*Copying tools from Fusion 360*
+
+![Paste in ncSender](docs/screenshots/ncsender-paste-clipboard.png)
+*Pasting tools in ncSender*
+
+**Method 2: JSON File (Full Library)**
 1. Export your Fusion 360 tools as **JSON** (Tool Library → Export)
 2. In ncSender: **Plugins → Fusion 360 Tool Importer**
-3. Select the JSON file
+3. Click **Select JSON File**
 4. Review the comparison table
 5. Choose **Import New** or **Import All**
 
@@ -61,11 +82,12 @@ The plugin will appear in **Plugins → Fusion 360 Tool Importer** menu.
 ### Load G-Code
 
 1. Load any Fusion 360 G-code file
-2. Plugin shows mapping status dialog
-3. Map any unmapped tools if needed (click the tool button)
-4. Click **Map Tools** to proceed or **Bypass Mapping** to skip
+2. **Visual slot carousel** shows your ATC layout (green = used, grey = unused, empty = no tool)
+3. **Click any tool row** to open slot assignment dropdown
+4. **Select target slot** - automatically handles swaps if slot is occupied
+5. Click **Map Tools** to proceed or **Bypass Mapping** to skip
 
-That's it! The dialogs guide you through the rest.
+The interface matches ncSender's native tool library for a consistent experience!
 
 ## ⚙️ Settings
 
@@ -75,7 +97,7 @@ That's it! The dialogs guide you through the rest.
 
 ### Translation Options
 Located in Plugins tab → Plugin settings:
-- **Enable tool number translation** - Toggles automatic G-code translation on/off
+- **Enable Automatic Tool Number <-> ATC Slot Mapping** - Toggles automatic G-code translation on/off
 
 ## 🎨 Status Indicators
 
@@ -88,16 +110,26 @@ The plugin uses color-coded status:
 
 ### Tool Mapping Process
 1. Parses all `M6`, `T##`, and `H##` commands in G-code
-2. Loads tool library and mappings from ncSender
-3. Shows status dialog with color-coded categorization
-4. Translates commands if user confirms
-5. Preserves original Fusion tool IDs in comments
+2. Loads tool library and current slot assignments from ncSender
+3. Shows interactive dialog with visual slot carousel and tool table
+4. User can reassign any tool to any slot (with automatic conflict resolution)
+5. Translates all tool references when user clicks "Map Tools"
+6. Preserves original Fusion tool IDs in comments for reference
+
+### Import Formats
+- **JSON**: Full tool library export from Fusion 360
+- **TSV/Clipboard**: Tab-separated values from Fusion 360 tool list copy
+
+### Slot Assignment
+- **Library Tools**: Slot assignments persist in ncSender's tool library
+- **Unknown Tools**: Temporary slot mappings (session-only, don't persist)
+- **Smart Swapping**: 3-step swap process prevents slot conflicts
 
 ### Compatibility
-- **ncSender**: TBD
-- **Fusion 360**: All recent versions (JSON export format)
+- **ncSender**: 0.3.131+
+- **Fusion 360**: All recent versions (JSON and TSV formats)
 
 ---
 
-**Version**: 2.0.1  
+**Version**: 2.1.0  
 **Repository**: [github.com/cotepat/ncsender-plugin-fusion360-tool-importer](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer)

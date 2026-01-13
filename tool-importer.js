@@ -20,8 +20,8 @@ export function init(ctx) {
 export function showImportDialog() {
   const settings = pluginContext.getSettings();
   const defaultSettings = {
-    includeFusionToolNumber: settings.includeFusionToolNumber !== undefined ? settings.includeFusionToolNumber : true,
-    preserveToolNumber: settings.preserveToolNumber !== undefined ? settings.preserveToolNumber : false
+    includeFusionToolNumber: settings.includeFusionToolNumber !== undefined ? settings.includeFusionToolNumber : false,
+    preserveToolNumber: settings.preserveToolNumber !== undefined ? settings.preserveToolNumber : true
   };
   
   const html = `
@@ -70,6 +70,8 @@ export function showImportDialog() {
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s;
+        user-select: none;
+        -webkit-user-select: none;
       }
       
       .fusion-btn-primary {
@@ -191,7 +193,6 @@ export function showImportDialog() {
         font-weight: 600;
         border-bottom: 2px solid var(--color-border, #444);
         font-size: 0.85rem;
-        text-transform: uppercase;
         letter-spacing: 0.5px;
       }
       
@@ -228,15 +229,36 @@ export function showImportDialog() {
         color: #6c757d;
       }
       
+      .fusion-tool-id-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      .fusion-tool-id-text {
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      
       .fusion-tool-number-badge {
         display: inline-block;
-        padding: 6px 16px;
-        border: 1px solid var(--color-accent, #1abc9c);
-        border-radius: 4px;
-        background: var(--color-surface, #1a1a1a);
-        color: var(--color-text-primary, #e0e0e0);
-        font-size: 0.85rem;
-        font-weight: 500;
+        padding: 2px 6px;
+        border: 1px solid #f59e0b;
+        border-radius: 3px;
+        background: #f59e0b;
+        color: #000;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        width: fit-content;
+      }
+      
+      .fusion-tool-slot-placeholder {
+        font-size: 0.65rem;
+        color: var(--color-text-secondary, #999);
+        opacity: 0.6;
       }
       
       .fusion-actions {
@@ -273,7 +295,7 @@ export function showImportDialog() {
     
     <div class="fusion-import-container">
       <div class="fusion-header">
-        <p>Import tools from Fusion 360 tool library JSON export</p>
+        <p>Import tools from Fusion 360 tool library (JSON file or clipboard paste)</p>
       </div>
       
       <!-- File Selector -->
@@ -282,6 +304,11 @@ export function showImportDialog() {
         <button id="selectFileBtn" class="fusion-btn fusion-btn-primary">
           Select Fusion 360 JSON File
         </button>
+        <div style="margin-top: 12px;">
+          <button id="pasteClipboardBtn" class="fusion-btn fusion-btn-secondary">
+            Paste tool(s) from clipboard
+          </button>
+        </div>
       </div>
       
       <!-- Configuration -->
@@ -293,7 +320,7 @@ export function showImportDialog() {
         </div>
         <div class="fusion-config-item">
           <input type="checkbox" id="preserveToolNumber" ${defaultSettings.preserveToolNumber ? 'checked' : ''}>
-          <label for="preserveToolNumber">Do not overwrite ncSender Tool Number with Fusion 360 turret number (keep existing)</label>
+          <label for="preserveToolNumber">Do not overwrite ncSender Slot number with Fusion 360 turret number (keep existing)</label>
         </div>
       </div>
       
@@ -329,8 +356,7 @@ export function showImportDialog() {
           <thead>
             <tr>
               <th>Status</th>
-              <th>ID</th>
-              <th>Tool #</th>
+              <th>Tool ID</th>
               <th>Description</th>
               <th>Type</th>
               <th>Diameter</th>
@@ -388,6 +414,8 @@ export function showImportDialog() {
         let existingTools = [];
         let newTools = [];
         let comparison = [];
+        let dataSource = null; // 'file' or 'clipboard'
+        let originalData = null; // Store original data for rebuilding
         let settings = {
           includeFusionToolNumber: ${defaultSettings.includeFusionToolNumber},
           preserveToolNumber: ${defaultSettings.preserveToolNumber}
@@ -412,6 +440,54 @@ export function showImportDialog() {
         
         document.getElementById('selectFileBtn').addEventListener('click', selectFile);
         
+        document.getElementById('pasteClipboardBtn').addEventListener('click', async function(event) {
+          event.preventDefault();
+          event.stopPropagation();
+          
+          document.getElementById('errorDisplay').classList.add('fusion-hidden');
+          document.getElementById('successDisplay').classList.add('fusion-hidden');
+          
+          try {
+            // Directly read clipboard - this executes immediately without showing a menu
+            const clipboardText = await navigator.clipboard.readText();
+            if (!clipboardText || clipboardText.trim() === '') {
+              showError('Clipboard is empty');
+              return;
+            }
+            
+            dataSource = 'clipboard';
+            originalData = clipboardText;
+            const tools = parseTSVData(clipboardText, settings);
+            
+            if (tools.length === 0) {
+              showError('No valid tools found in clipboard data');
+              return;
+            }
+            
+            newTools = tools;
+            await loadExistingTools();
+            rebuildComparison();
+            
+            document.getElementById('fileSelector').classList.add('fusion-hidden');
+            document.getElementById('configSection').classList.remove('fusion-hidden');
+            document.getElementById('summarySection').classList.remove('fusion-hidden');
+            document.getElementById('tableSection').classList.remove('fusion-hidden');
+            document.getElementById('actionsSection').classList.remove('fusion-hidden');
+            
+          } catch (error) {
+            if (error.name === 'NotAllowedError' || error.name === 'NotFoundError') {
+              showError('Please allow clipboard access or copy the data first');
+            } else {
+              showError('Failed to read clipboard: ' + error.message);
+            }
+          }
+        });
+        
+        // Prevent context menu on paste button
+        document.getElementById('pasteClipboardBtn').addEventListener('contextmenu', function(event) {
+          event.preventDefault();
+        });
+        
         document.getElementById('fileInput').onchange = async function(event) {
           const file = event.target.files[0];
           if (!file) return;
@@ -423,6 +499,8 @@ export function showImportDialog() {
             const content = await file.text();
             const fusionData = JSON.parse(content);
             
+            dataSource = 'file';
+            originalData = fusionData;
             newTools = [];
             const errors = [];
             
@@ -468,6 +546,176 @@ export function showImportDialog() {
           }
         };
         
+        function parseTSVData(tsvText, settings) {
+          const lines = tsvText.split('\\n').filter(line => line.trim() !== '');
+          if (lines.length < 2) {
+            return [];
+          }
+          
+          // Parse header row
+          const headerLine = lines[0];
+          const headers = parseTSVLine(headerLine);
+          
+          // Find column indices
+          const columnMap = {};
+          headers.forEach((header, index) => {
+            // Remove quotes and extract field name
+            const cleanHeader = header.replace(/^"|"$/g, '').trim();
+            columnMap[cleanHeader] = index;
+          });
+          
+          // Parse data rows and deduplicate by toolId (keep first occurrence)
+          const tools = [];
+          const seenToolIds = new Set();
+          const errors = [];
+          
+          for (let i = 1; i < lines.length; i++) {
+            try {
+              const values = parseTSVLine(lines[i]);
+              const tool = convertTSVTool(values, columnMap, settings);
+              if (tool) {
+                // Only add tool if we haven't seen this toolId before
+                // This handles multiple rows for the same tool (different presets)
+                if (!seenToolIds.has(tool.toolId)) {
+                  seenToolIds.add(tool.toolId);
+                  tools.push(tool);
+                }
+              }
+            } catch (error) {
+              errors.push(\`Row \${i + 1}: \${error.message}\`);
+            }
+          }
+          
+          if (errors.length > 0 && tools.length === 0) {
+            throw new Error('Failed to parse any tools:\\n' + errors.slice(0, 5).join('\\n'));
+          }
+          
+          return tools;
+        }
+        
+        function parseTSVLine(line) {
+          const values = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            
+            if (char === '"') {
+              inQuotes = !inQuotes;
+            } else if (char === '\\t' && !inQuotes) {
+              values.push(current);
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          values.push(current); // Add last value
+          
+          return values;
+        }
+        
+        function convertTSVTool(values, columnMap, settings) {
+          // Helper to get value by column name
+          const getValue = (columnName) => {
+            const index = columnMap[columnName];
+            if (index === undefined || index >= values.length) return '';
+            const value = values[index];
+            // Remove surrounding quotes if present
+            return value.replace(/^"|"$/g, '').trim();
+          };
+          
+          // Get required fields
+          const toolIndexStr = getValue('Tool Index (tool_index)');
+          if (!toolIndexStr || toolIndexStr === '') {
+            throw new Error('Missing tool index');
+          }
+          
+          const toolIndex = parseInt(toolIndexStr, 10);
+          if (isNaN(toolIndex)) {
+            throw new Error(\`Invalid tool index: \${toolIndexStr}\`);
+          }
+          
+          // Get tool number (this is the Fusion 360 tool number that appears in G-code, e.g., T21)
+          const toolNumberStr = getValue('Number (tool_number)');
+          let fusionToolNumber = null;
+          let toolNumber = null; // ATC pocket number (from turret field, if available)
+          
+          if (toolNumberStr && toolNumberStr !== '') {
+            const num = parseInt(toolNumberStr, 10);
+            if (!isNaN(num) && num > 0) {
+              fusionToolNumber = num; // This becomes toolId
+            }
+          }
+          
+          // If no tool number, fall back to tool index
+          if (fusionToolNumber === null) {
+            fusionToolNumber = toolIndex;
+          }
+          
+          // Get turret number (ATC slot) from TSV if available - but only if not preserving
+          if (!settings.preserveToolNumber) {
+            const turretStr = getValue('Turret (tool_turret)');
+            if (turretStr && turretStr !== '') {
+              const turretNum = parseInt(turretStr, 10);
+              if (!isNaN(turretNum) && turretNum > 0) {
+                toolNumber = turretNum;
+              }
+            }
+          }
+          
+          // Get diameter
+          const diameterStr = getValue('Diameter (tool_diameter)');
+          const diameter = parseFloat(diameterStr);
+          if (isNaN(diameter) || diameter <= 0) {
+            throw new Error(\`Invalid diameter: \${diameterStr}\`);
+          }
+          
+          // Get type
+          const toolType = getValue('Type (tool_type)') || '';
+          const ncSenderType = TYPE_MAPPING[toolType.toLowerCase()] || 'flat';
+          
+          // Get description
+          let description = getValue('Description (tool_description)') || '';
+          if (!description || description.trim() === '') {
+            const presetName = getValue('Preset Name (preset_name)') || '';
+            if (presetName) {
+              description = presetName;
+            } else {
+              const paddedNumber = String(fusionToolNumber).padStart(3, '0');
+              description = \`Tool \${paddedNumber}\`;
+            }
+          }
+          
+          // Add Fusion tool number to description if enabled
+          if (settings.includeFusionToolNumber) {
+            const paddedNumber = String(fusionToolNumber).padStart(3, '0');
+            if (!description.startsWith(\`\${paddedNumber} -\`) && !description.startsWith(\`\${fusionToolNumber} -\`)) {
+              description = \`\${paddedNumber} - \${description}\`;
+            }
+          }
+          
+          // Get comment/notes
+          const comment = getValue('Comment (tool_comment)') || '';
+          
+          // Get product ID/SKU
+          const productId = getValue('Product ID (tool_productId)') || '';
+          
+          return {
+            toolId: fusionToolNumber,
+            toolNumber: toolNumber,
+            name: description.trim(),
+            type: ncSenderType,
+            diameter: diameter,
+            offsets: { tlo: 0, x: 0, y: 0, z: 0 },
+            metadata: {
+              notes: comment,
+              image: '',
+              sku: productId
+            }
+          };
+        }
+        
         function convertFusionTool(fusionTool, settings) {
           const fusionToolNumber = fusionTool['post-process']?.number;
           if (fusionToolNumber === undefined || fusionToolNumber === null) {
@@ -477,8 +725,12 @@ export function showImportDialog() {
           const fusionType = fusionTool.type?.toLowerCase() || '';
           const ncSenderType = TYPE_MAPPING[fusionType] || 'flat';
           
-          const turret = fusionTool['post-process']?.turret;
-          const toolNumber = (turret !== undefined && turret !== null && turret > 0) ? turret : null;
+          // Only get turret if not preserving existing slot assignments
+          let toolNumber = null;
+          if (!settings.preserveToolNumber) {
+            const turret = fusionTool['post-process']?.turret;
+            toolNumber = (turret !== undefined && turret !== null && turret > 0) ? turret : null;
+          }
           
           const diameter = fusionTool.geometry?.DC || 0;
           if (diameter <= 0) {
@@ -487,8 +739,14 @@ export function showImportDialog() {
           
           let description = fusionTool.description || '';
           if (!description || description.trim() === '') {
-            const paddedNumber = String(fusionToolNumber).padStart(3, '0');
-            description = \`Tool \${paddedNumber}\`;
+            // Try preset name as fallback (matches TSV import behavior)
+            const presetName = fusionTool['preset-name'] || '';
+            if (presetName) {
+              description = presetName;
+            } else {
+              const paddedNumber = String(fusionToolNumber).padStart(3, '0');
+              description = \`Tool \${paddedNumber}\`;
+            }
           }
           
           if (settings.includeFusionToolNumber) {
@@ -499,7 +757,7 @@ export function showImportDialog() {
           }
           
           return {
-            id: fusionToolNumber,
+            toolId: fusionToolNumber,
             toolNumber: toolNumber,
             name: description.trim(),
             type: ncSenderType,
@@ -515,7 +773,7 @@ export function showImportDialog() {
         
         function rebuildComparison() {
           comparison = newTools.map(newTool => {
-            const existing = existingTools.find(t => t.id === newTool.id);
+            const existing = existingTools.find(t => t.toolId === newTool.toolId);
             let status = 'new';
             const changes = [];
             
@@ -523,7 +781,8 @@ export function showImportDialog() {
               if (existing.name !== newTool.name) changes.push('Description');
               if (existing.type !== newTool.type) changes.push('Type');
               if (Math.abs(existing.diameter - newTool.diameter) > 0.001) changes.push('Diameter');
-              if (!settings.preserveToolNumber && existing.toolNumber !== newTool.toolNumber) changes.push('Tool #');
+              // Only flag slot changes if we're actually updating slots (not preserving)
+              if (!settings.preserveToolNumber && existing.toolNumber !== newTool.toolNumber) changes.push('Slot');
               if (existing.metadata?.notes !== newTool.metadata.notes) changes.push('Notes');
               if (existing.metadata?.sku !== newTool.metadata.sku) changes.push('SKU');
               
@@ -533,7 +792,7 @@ export function showImportDialog() {
             return { status, tool: newTool, existing: existing || null, changes };
           });
           
-          comparison.sort((a, b) => a.tool.id - b.tool.id);
+          comparison.sort((a, b) => a.tool.toolId - b.tool.toolId);
           updateUI();
         }
         
@@ -551,9 +810,19 @@ export function showImportDialog() {
           const tbody = document.getElementById('tableBody');
           tbody.innerHTML = comparison.map(item => {
             const statusClass = \`fusion-status-\${item.status}\`;
-            const toolNumberDisplay = item.tool.toolNumber !== null 
-              ? \`<span class="fusion-tool-number-badge">T\${item.tool.toolNumber}</span>\`
-              : '-';
+            
+            // Build Tool ID cell with slot badge (matching ncSender display)
+            const slotBadge = item.tool.toolNumber !== null 
+              ? \`<span class="fusion-tool-number-badge">Slot\${item.tool.toolNumber}</span>\`
+              : \`<span class="fusion-tool-slot-placeholder">No Slot</span>\`;
+            
+            const toolIdCell = \`
+              <div class="fusion-tool-id-cell">
+                <span class="fusion-tool-id-text">\${item.tool.toolId}</span>
+                \${slotBadge}
+              </div>
+            \`;
+            
             const changesDisplay = item.changes && item.changes.length > 0 
               ? item.changes.join(', ')
               : '-';
@@ -561,8 +830,7 @@ export function showImportDialog() {
             return \`
               <tr>
                 <td><span class="fusion-status-badge \${statusClass}">\${item.status}</span></td>
-                <td>\${item.tool.id}</td>
-                <td>\${toolNumberDisplay}</td>
+                <td>\${toolIdCell}</td>
                 <td>\${item.tool.name}</td>
                 <td>\${item.tool.type}</td>
                 <td>\${item.tool.diameter.toFixed(2)} mm</td>
@@ -576,28 +844,84 @@ export function showImportDialog() {
           settings.includeFusionToolNumber = event.target.checked;
           await saveSettings();
           
-          const fileInput = document.getElementById('fileInput');
-          if (fileInput.files[0]) {
-            try {
-              const content = await fileInput.files[0].text();
-              const fusionData = JSON.parse(content);
+          try {
+            if (dataSource === 'file' && originalData) {
+              // Rebuild from JSON file data
               newTools = [];
-              for (const fusionTool of fusionData.data || []) {
+              for (const fusionTool of originalData.data || []) {
                 try {
                   const ncTool = convertFusionTool(fusionTool, settings);
                   newTools.push(ncTool);
                 } catch (error) {}
               }
-            } catch (error) {
-              showError('Failed to rebuild tools: ' + error.message);
+            } else if (dataSource === 'clipboard' && originalData) {
+              // Rebuild from TSV clipboard data
+              newTools = parseTSVData(originalData, settings);
+            } else {
+              // Fallback: try to read from file input
+              const fileInput = document.getElementById('fileInput');
+              if (fileInput.files[0]) {
+                const content = await fileInput.files[0].text();
+                const fusionData = JSON.parse(content);
+                originalData = fusionData;
+                dataSource = 'file';
+                newTools = [];
+                for (const fusionTool of fusionData.data || []) {
+                  try {
+                    const ncTool = convertFusionTool(fusionTool, settings);
+                    newTools.push(ncTool);
+                  } catch (error) {}
+                }
+              }
             }
+          } catch (error) {
+            showError('Failed to rebuild tools: ' + error.message);
           }
+          
           rebuildComparison();
         };
         
         document.getElementById('preserveToolNumber').onchange = async function(event) {
           settings.preserveToolNumber = event.target.checked;
           await saveSettings();
+          
+          // Rebuild tools from original data with new setting
+          try {
+            if (dataSource === 'file' && originalData) {
+              newTools = [];
+              for (const fusionTool of originalData.data || []) {
+                try {
+                  const ncTool = convertFusionTool(fusionTool, settings);
+                  
+                  // If preserving and tool exists in library, use its current slot
+                  if (settings.preserveToolNumber) {
+                    const existing = existingTools.find(t => t.toolId === ncTool.toolId);
+                    if (existing) {
+                      ncTool.toolNumber = existing.toolNumber;
+                    }
+                  }
+                  
+                  newTools.push(ncTool);
+                } catch (error) {}
+              }
+            } else if (dataSource === 'clipboard' && originalData) {
+              newTools = parseTSVData(originalData, settings);
+              
+              // If preserving, update slots for existing tools
+              if (settings.preserveToolNumber) {
+                newTools = newTools.map(ncTool => {
+                  const existing = existingTools.find(t => t.toolId === ncTool.toolId);
+                  if (existing) {
+                    return { ...ncTool, toolNumber: existing.toolNumber };
+                  }
+                  return ncTool;
+                });
+              }
+            }
+          } catch (error) {
+            showError('Failed to rebuild tools: ' + error.message);
+          }
+          
           rebuildComparison();
         };
         
@@ -654,9 +978,14 @@ export function showImportDialog() {
             .filter(c => c.status === 'new' || c.status === 'modified')
             .map(c => {
               const tool = { ...c.tool };
+              
+              // If preserveToolNumber is checked and tool exists, use existing slot
               if (settings.preserveToolNumber && c.existing) {
                 tool.toolNumber = c.existing.toolNumber;
               }
+              // Otherwise: tool.toolNumber is already correct from conversion
+              // (null if preserving, or Fusion turret if not)
+              
               return tool;
             });
           
@@ -673,11 +1002,18 @@ export function showImportDialog() {
             const mergedTools = [...existingTools];
             
             toolsToImport.forEach(importTool => {
-              const existingIndex = mergedTools.findIndex(t => t.id === importTool.id);
+              const existingIndex = mergedTools.findIndex(t => t.toolId === importTool.toolId);
               if (existingIndex >= 0) {
-                mergedTools[existingIndex] = importTool;
+                // Update existing tool: preserve id and merge other properties
+                const existingTool = mergedTools[existingIndex];
+                mergedTools[existingIndex] = { 
+                  ...importTool, 
+                  id: existingTool.id  // Preserve the existing internal id
+                };
               } else {
-                mergedTools.push(importTool);
+                // New tool - remove id if present, let ncSender migration generate it
+                const { id, ...newTool } = importTool;
+                mergedTools.push(newTool);
               }
             });
             

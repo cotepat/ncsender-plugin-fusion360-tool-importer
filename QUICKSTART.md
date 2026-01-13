@@ -63,31 +63,39 @@ The GitHub Action will automatically:
 
 ## Using the Plugin
 
-### Exporting from Fusion 360
+### Importing Tools from Fusion 360
 
-1. Open Fusion 360
-2. Go to **Manufacture** workspace
-3. Open **Tool Library** manager
-4. Select tools to export (or select all)
-5. Right-click → **Export**
-6. Save as **JSON** format
+#### Method 1: Clipboard Import (Quick & Easy)
 
-### Importing into ncSender
+1. Open Fusion 360 → **Manufacture** workspace → **Tool Library**
+2. Select tools to import (click to select, Shift+click for range, Cmd/Ctrl+A for all)
+3. Right-click → **Copy** (or Cmd/Ctrl+C)
+4. Open ncSender → **Plugins → Fusion 360 Tool Importer**
+5. Click **Paste from Clipboard**
+6. Review the comparison table
+7. Choose **Import New** or **Import All**
 
-1. Open ncSender
-2. Select **Plugins → Fusion 360 Tool Importer** from the menu
-3. Click **Select Fusion 360 JSON File**
-4. Choose your exported JSON file
-5. Configure import options:
+**Benefits**: Fast, no need to export files, perfect for small updates
+
+#### Method 2: JSON File Import (Full Library)
+
+1. Open Fusion 360 → **Manufacture** workspace → **Tool Library**
+2. Select tools to export (or select all)
+3. Right-click → **Export** → Save as **JSON** format
+4. Open ncSender → **Plugins → Fusion 360 Tool Importer**
+5. Click **Select Fusion 360 JSON File**
+6. Choose your exported JSON file
+7. Configure import options:
    - ☑️ **Include Fusion 360 tool number in description**: Adds padded numbers like "001 - End Mill"
-   - ☑️ **Do not overwrite ATC Tool Number**: Preserves existing tool numbers
-6. Review the preview:
+   - ☑️ **Do not overwrite ncSender Slot number**: Preserves existing ATC slot assignments
+8. Review the preview:
    - **Summary stats**: Shows total, new, and modified tools
    - **Comparison table**: Lists all tools with their status and changes
-7. Choose import action:
+9. Choose import action:
    - **Import New**: Only adds tools that don't exist yet
    - **Import All**: Imports new tools and updates modified ones
-8. Tools are imported automatically
+
+**Benefits**: Best for initial setup, large updates, or archiving tool libraries
 
 **Smart Detection (v1.2.0+)**:
 - The plugin compares your file against existing tools by ID
@@ -111,12 +119,12 @@ Fusion 360's `assemblyGaugeLength` is for CAM simulation only and does not repre
 ### Tool ID and Number Mapping
 
 **Duplicate Prevention (v1.1.0+)**:
-- **Fusion 360 `number`** field → **ncSender `id`** (for duplicate detection)
+- **Fusion 360 `number`** field → **ncSender `toolId`** (for duplicate detection)
 - **Fusion 360 `turret`** field → **ncSender `toolNumber`** (ATC slot)
 
 **What This Means**:
-- First import: Tool #42 in Fusion → ID 42 in ncSender
-- Re-import same library: Plugin detects tool ID 42 exists and shows as MODIFIED or UNCHANGED
+- First import: Tool #42 in Fusion → toolId 42 in ncSender
+- Re-import same library: Plugin detects tool toolId 42 exists and shows as MODIFIED or UNCHANGED
 - **No duplicate tools** when re-importing!
 
 **Update Workflow**:
@@ -126,43 +134,41 @@ Fusion 360's `assemblyGaugeLength` is for CAM simulation only and does not repre
 4. Select file and review changes
 5. Import new/modified tools
 
-**Preserve Tool Number Option (v1.2.0+)**:
-- When enabled, existing ATC tool numbers are preserved
-- Useful if you've manually assigned tool numbers in ncSender
+**Preserve Slot Number Option (v2.0+)**:
+- When enabled, existing ATC slot assignments are preserved
+- Useful if you've manually assigned slots in ncSender
 - Fusion 360's `turret` field is ignored for existing tools
+- If a tool has `turret = 0` in Fusion 360, it will be imported without a slot assignment
 
-If a tool has `turret = 0` in Fusion 360, it will be imported without an ATC slot assignment (`toolNumber = null`).
+### Using the G-code Translator
 
-## Troubleshooting
+When you load a Fusion 360 G-code file, the plugin automatically:
 
-**Import fails with "Invalid format" error:**
-- Ensure you exported as JSON format (not XML or other formats)
-- Verify the file is a valid Fusion 360 tool library export
+1. **Analyzes Tools**: Scans for all tool changes (T## M6 commands)
+2. **Shows Visual Slot Carousel**: Displays all ATC slots with color coding:
+   - **Green**: Tool is in this slot AND used in the G-code
+   - **Grey**: Tool is in this slot but NOT used in the G-code
+   - **Empty (—)**: No tool assigned to this slot
+3. **Displays Tool Table**: Lists all tools with their current status
+4. **Interactive Mapping**: Click any tool row to reassign its slot
 
-**Some tools are skipped:**
-- Check ncSender console for detailed error messages
-- Tools missing required fields (diameter, type) are automatically skipped
-- Review the skipped tools log for specific reasons
+#### Assigning Tool Slots
 
-**Tool names are different than expected:**
-- Toggle the "Include Fusion 360 tool number" checkbox in the import dialog
-- Verify Fusion 360 tool descriptions are not empty
-- Tool numbers will be padded with leading zeros (001, 010, 100)
+**To assign a tool to a slot:**
+1. Click the tool's row in the table
+2. Select target slot from dropdown
+3. If slot is occupied, you'll see "Swap with #XX" - select it to swap
+4. Dialog refreshes automatically to show new assignments
 
-**Wrong tool numbers:**
-- Remember: ncSender's tool number is the ATC slot (from Fusion's `turret` field)
-- Fusion's tool number becomes the ncSender ID (for duplicate detection, not shown in UI)
-- Fusion's tool number is optionally prefixed in the description with leading zeros
-- Use "Preserve Tool Number" option to keep existing ATC assignments
+**Unknown Tools** (not in your library):
+- Can be mapped to slots temporarily (for this G-code only)
+- Session mappings don't persist after closing
+- Shows with red "Unknown" status badge
 
-**Duplicate tools after re-import:**
-- This shouldn't happen in v1.1.0+
-- Ensure you're using the latest version of the plugin
-- The import preview should show tools as MODIFIED or UNCHANGED, not NEW
-
-**Can't find the importer:**
-- Plugin appears in **Tools** menu, not in the Tools tab import dropdown
-- Look for **Plugins → Fusion 360 Tool Importer** in the menu bar
+**Smart Slot Swapping:**
+- Automatically handles conflicts when two tools want the same slot
+- 3-step swap process prevents conflicts
+- Works for library tools, unknown tools, or combinations
 
 ## Support
 

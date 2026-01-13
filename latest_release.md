@@ -1,70 +1,58 @@
-# Fusion 360 Tool Library Import v2.0.1
+# Fusion 360 Tool Library Import v2.1.0
 
-## Version 2.0.1 - G-Code Translation & Tool Mapping (Major Feature Release)
+## What's New
 
-### 🎉 Major Changes
+This release introduces a completely redesigned G-code translation interface with **visual slot carousel** and **interactive tool mapping**, matching ncSender's native tool library UI. Plus, **clipboard import** for lightning-fast tool updates!
 
-This release completely reimagines the plugin as a **self-contained utility** that requires **NO changes to the ncSender core application**. The plugin now provides its own complete user interface and workflow.
+### ✨ Major Features
 
-**Breaking Change**: The plugin is no longer a "tool-importer" category plugin. Instead, it's a "utility" plugin that adds **Plugins → Fusion 360 Tool Importer**.
+#### Visual Slot Management
+- 🟢 **Green slots**: Tool is in slot AND used in your G-code
+- ⚙️ **Grey slots**: Tool is in slot but NOT used in G-code  
+- **Empty (—)**: No tool assigned to slot
+- **Click any tool** to assign/reassign slots with dropdown
+- **Smart swapping**: Automatically handles conflicts when slots are occupied
 
-### ✨ New Features
+#### Clipboard Import
+- Copy tools directly from Fusion 360 tool library (no file export needed!)
+- Paste in ncSender and see instant preview
+- Perfect for quick tool updates
 
-#### Complete Built-in UI
-- **Custom Import Dialog**: Beautiful, intuitive dialog with real-time preview
-- **Smart Comparison Table**: See exactly which tools are NEW, MODIFIED, or UNCHANGED
-- **Summary Statistics**: Quick overview of tools in file vs. current library
-- **Inline Configuration**: Settings are right in the import dialog - no need to visit a separate settings page
-- **Visual Status Badges**: Color-coded badges show tool status at a glance
-- **Change Detection**: See exactly what changed for each tool (Description, Type, Diameter, etc.)
-
-#### Enhanced Import Options
-- **Selective Import**: Choose to import only new tools or all changes
-- **Preserve Tool Numbers**: New option to keep existing ATC tool number assignments
-- **Delete Library**: Option to clear all tools before importing (use with caution!)
-- **Import Preview**: Review all changes before committing
-
-#### Improved Tool Number Formatting
-- **Leading Zeros**: Tool numbers now display with leading zeros (001, 010, 100) for proper sorting
-- **Sortable Descriptions**: When "Include Fusion 360 tool number" is enabled, descriptions sort correctly
-
-#### Expanded Type Mapping
-Added support for many more Fusion 360 tool types:
-- Bull Nose End Mill → ball
-- Countersink → v-bit
-- Dovetail Mill → v-bit
-- Tapered Mill → v-bit
-- Counterbore → drill
-- Reamer → drill
-- Spot Drill → drill
-- Slot Mill → flat
-- Form Mill → flat
-- Tap (all types) → thread-mill
-- Probe → probe
-
-### 🔧 Technical Changes
-
-#### Plugin Architecture
-- **Category**: Changed from `tool-importer` to `utility`
-- **API Used**: `registerToolMenu()` instead of `registerToolImporter()`
-- **Self-Contained**: All logic is within the plugin - no dependency on core app APIs
-- **Standard REST API**: Uses `/api/tools` endpoint for tool management
-- **Custom Dialog**: Uses `showDialog()` with complete HTML/CSS/JS interface
-
-### 📍 How to Access
-
-**Current (v2.0.1)**: **Plugins → Fusion 360 Tool Importer**
+#### Improved Tool Mapping
+- Click-to-map: Click tool row → select slot → done!
+- Unknown tools can be mapped temporarily (session-only, won't persist)
+- Library tools persist automatically when mapped
+- Handles all swap scenarios automatically
 
 ### 🐛 Bug Fixes
 
-- Fixed tool number display to use consistent zero-padding throughout
-- Improved error handling and user feedback
-- Better detection of duplicate tools
-- More robust JSON parsing and validation
+- Fixed swap functionality to properly exchange tools between slots
+- Fixed unknown tool mapping to "Not in magazine"
+- Fixed session mappings not clearing when unassigned
+- Fixed Tool ID display showing correct Fusion 360 tool number
+- Fixed status badge colors to match indicators
+- Fixed carousel not updating when unknown tools are mapped
+- Fixed JSON import to match clipboard import behavior
 
-### 📚 Documentation Updates
+### 📍 How to Use
 
-- Updated all documentation to reflect new menu-based workflow
-- Removed references to "tool-importer" plugin category
-- Added comprehensive UI usage guide
-- Updated troubleshooting section with new location
+**Visual Slot Management:**
+1. Load G-code → See slot carousel at top
+2. Click any tool row to assign/change slot
+3. Select from dropdown (shows swaps if needed)
+4. Click "Map Tools" to translate
+
+**Clipboard Import:**
+1. In Fusion 360: Select tools → Copy
+2. In ncSender: Plugins → Fusion 360 Tool Importer
+3. Click "Paste from Clipboard"
+4. Review → Import
+
+### ⚙️ Requirements
+
+- **ncSender**: 0.3.131 or higher
+- **Fusion 360**: Any recent version
+
+---
+
+**Full Changelog**: https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/compare/v2.0.5...v2.1.0

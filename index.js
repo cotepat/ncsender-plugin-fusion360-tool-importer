@@ -115,12 +115,11 @@ function registerPluginSettings(ctx) {
         <div class="setting-item">
           <input type="checkbox" id="enableToolNumberTranslation">
           <label for="enableToolNumberTranslation" class="setting-label">
-            <strong>Enable Tool Number Mapping</strong>
+            <strong>Enable Automatic Tool Number <-> ATC Slot Mapping</strong>
             <div class="description">
-              Automatically map Fusion 360 tool numbers (e.g., T84) to ncSender ATC pockets (e.g., T1) when loading G-code files (e.g. T84 is in ATC pocket 1).
-              This addresses a limitation of ncSender which ties tool numbers to ATC pockets (T1 is always in ATC pocket 1).
-              This option will translate all tool numbers in the G-code file to the corresponding ncSender ATC pocket number.
-              If you want to use the original tool number (e.g. T84 instead of T1), you can disable this option.
+              Automatically map Fusion 360 tool numbers (e.g., T84 in gcode) to ncSender ATC slots (e.g., T1) when loading G-code files (e.g. T84 is in ATC slot 1).
+              This option will translate all tool numbers in the G-code file to the corresponding ncSender ATC slot number.
+              If you want to use the original tool number (e.g. pass through T84 instead of T1), you can disable this option.
             </div>
           </label>
         </div>

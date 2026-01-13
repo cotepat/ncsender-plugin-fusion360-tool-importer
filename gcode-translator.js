@@ -27,22 +27,17 @@ export function registerHandler(ctx) {
     // Check if translation is enabled (default to true)
     const enableTranslation = settings.enableToolNumberTranslation !== undefined ? settings.enableToolNumberTranslation : true;
     
-    ctx.log(`Tool number translation enabled: ${enableTranslation}`);
-    
     if (!enableTranslation) {
-      ctx.log('Tool number translation is disabled - loading original G-code');
       return content;
     }
     
     ctx.log('Fusion 360 Tool Translator: Analyzing G-code...');
     
-    // Load tool library and manual mappings
     const toolLibrary = await loadToolLibrary();
-    const manualMappings = settings.manualToolMappings || {};
-    ctx.log('Initial manual mappings:', JSON.stringify(manualMappings));
     
     // Parse G-code and find all tool changes
     const lines = content.split('\n');
+    let manualMappings = {}; // Empty - will be populated if user maps tools in dialog
     const toolChanges = parseToolChanges(lines, toolLibrary, manualMappings);
     
     // No tool changes found - skip silently
@@ -51,47 +46,44 @@ export function registerHandler(ctx) {
       return content;
     }
     
-    // Check status and show dialog
     const status = determineStatus(toolChanges);
     
-    ctx.log('Showing dialog to user...');
-    
-    // Show status dialog with options (loop for refresh on mapping changes)
+    // Show status dialog (loop for refresh on mapping changes)
     let userChoice;
     let currentToolChanges = toolChanges;
     let currentStatus = status;
     let currentToolLibrary = toolLibrary;
     
     while (true) {
-      userChoice = await showStatusDialog(context.filename, currentToolChanges, currentStatus, settings, content, lines, currentToolLibrary);
+      userChoice = await showStatusDialog(context.filename, currentToolChanges, currentStatus, settings, content, lines, currentToolLibrary, manualMappings);
       
-      ctx.log(`User choice received: "${userChoice}" (type: ${typeof userChoice})`);
+      // Handle object response with action and sessionMappings
+      const action = typeof userChoice === 'string' ? userChoice : userChoice?.action;
       
-      if (userChoice === 'refresh') {
-        // Reload tool library AND settings to get fresh data after changes
-        ctx.log('Reloading tool library and mappings...');
+      if (action === 'refresh') {
         currentToolLibrary = await loadToolLibrary();
-        const updatedSettings = ctx.getSettings();
-        const updatedManualMappings = updatedSettings.manualToolMappings || {};
-        ctx.log('Manual mappings loaded:', JSON.stringify(updatedManualMappings));
-        currentToolChanges = parseToolChanges(lines, currentToolLibrary, updatedManualMappings);
+        
+        if (userChoice.sessionMappings !== undefined) {
+          manualMappings = userChoice.sessionMappings;
+        }
+        
+        currentToolChanges = parseToolChanges(lines, currentToolLibrary, manualMappings);
         currentStatus = determineStatus(currentToolChanges);
-        ctx.log(`Status after refresh: ${currentStatus}, InMagazine: ${currentToolChanges.inMagazine.length}, NotInMagazine: ${currentToolChanges.notInMagazine.length}, Unknown: ${currentToolChanges.unknownTools.length}`);
-        continue; // Show dialog again with updated data
+        continue;
       }
       
-      break; // User chose bypass or map
+      break;
     }
     
-    if (userChoice === 'bypass') {
+    const action = typeof userChoice === 'string' ? userChoice : userChoice?.action;
+    
+    if (action === 'bypass') {
       ctx.log('Tool mapping bypassed - loading original G-code');
       return content;
     }
     
-    // userChoice === 'map' - sync tool library with mappings and perform translation
-    ctx.log('Syncing tool library with mappings...');
-    await syncToolLibraryWithMappings(currentToolChanges, ctx);
-    
+    // userChoice === 'map' - perform translation with current tool library state
+    // (no sync needed - library was already updated by individual mapping clicks)
     ctx.log('Starting tool translation...');
     const translatedContent = performTranslation(lines, currentToolChanges, settings, ctx);
     
@@ -100,10 +92,20 @@ export function registerHandler(ctx) {
 }
 
 /**
- * Parse tool changes from G-code lines
+ * M6 Pattern - matches M6 tool change commands (same as ncSender core)
  * 
- * Note: manualMappings uses -1 as a sentinel value to indicate "not in magazine"
- * (we can't use null because the API strips null values from JSON)
+ * Matches:
+ * - M6 T1, M6 T01, M06 T1 (with spaces)
+ * - M6T1, M06T1 (no space)
+ * - T1 M6, T1 M06 (T before M6)
+ * 
+ * Does NOT match:
+ * - M60, M61, M600 (other M-codes)
+ */
+const M6_PATTERN = /(?:^|[^A-Z])M0*6(?:\s*T0*(\d+)|(?=[^0-9T])|$)|(?:^|[^A-Z])T0*(\d+)\s*M0*6(?:[^0-9]|$)/i;
+
+/**
+ * Parse tool changes from G-code lines using ncSender's official M6 pattern
  */
 function parseToolChanges(lines, toolLibrary, manualMappings = {}) {
   const allTools = [];
@@ -111,28 +113,36 @@ function parseToolChanges(lines, toolLibrary, manualMappings = {}) {
   const inMagazine = [];
   const notInMagazine = [];
   const unknownTools = [];
-  
+
   const seenTools = new Set();
-  
+
   lines.forEach((line, index) => {
     if (!line.trim()) return;
-    
+
     const trimmed = line.trim();
-    if (trimmed.startsWith('(') || trimmed.startsWith(';')) return;
     
-    if (/M0?6/i.test(line)) {
-      const toolMatch = line.match(/T(\d+)/i);
-      if (toolMatch) {
-        const toolNumber = parseInt(toolMatch[1], 10);
+    // Skip comments (semicolon or parenthetical)
+    if (trimmed.startsWith(';')) return;
+    if (trimmed.startsWith('(') && trimmed.endsWith(')')) return;
+
+    // Match M6 command using ncSender's official pattern
+    const match = trimmed.match(M6_PATTERN);
+    if (match) {
+      // Extract tool number from either capture group
+      const toolNumberStr = match[1] || match[2];
+      if (toolNumberStr) {
+        const toolNumber = parseInt(toolNumberStr, 10);
         
         if (seenTools.has(toolNumber)) return;
         seenTools.add(toolNumber);
         
-        // Check for manual mapping first
-        const hasManualMapping = manualMappings.hasOwnProperty(toolNumber);
-        const manualPocketNumber = manualMappings[toolNumber];
+        // Check for manual mapping first (use string key for consistency)
+        const toolNumberKey = String(toolNumber);
+        const hasManualMapping = manualMappings.hasOwnProperty(toolNumberKey);
+        const manualPocketNumber = manualMappings[toolNumberKey];
         
         const toolInfo = toolLibrary[toolNumber];
+        pluginContext.log(`[Parse] G-code T${toolNumber}: toolInfo=${toolInfo ? 'found' : 'NOT FOUND'}, hasManual=${hasManualMapping}`);
         const toolData = {
           line: index + 1,
           toolNumber: toolNumber,
@@ -246,9 +256,38 @@ function getAvailablePockets(maxPocketCount) {
 /**
  * Show status dialog with Red/Yellow/Green indicators
  */
-async function showStatusDialog(filename, toolChanges, status, settings, content, lines, toolLibrary) {
+async function showStatusDialog(filename, toolChanges, status, settings, content, lines, toolLibrary, sessionMappings) {
     const magazineSize = await getMagazineSize();
     const availablePockets = getAvailablePockets(magazineSize);
+    
+    // Build slot state: which slots are filled and which tools are used in G-code
+    const usedToolNumbers = new Set(toolChanges.allTools.map(t => t.toolNumber));
+    const slotState = [];
+    for (let i = 1; i <= magazineSize; i++) {
+      // Check for tool in library
+      let toolInSlot = Object.values(toolLibrary).find(t => t.toolNumber === i);
+      
+      // Also check for session-mapped unknown tools
+      if (!toolInSlot) {
+        const unknownToolNumber = Object.keys(sessionMappings).find(key => sessionMappings[key] === i);
+        if (unknownToolNumber) {
+          toolInSlot = { toolId: unknownToolNumber, toolNumber: i, isTemporary: true };
+        }
+      }
+      
+      slotState.push({
+        slotNumber: i,
+        tool: toolInSlot || null,
+        isUsed: toolInSlot && (usedToolNumbers.has(toolInSlot.toolId) || usedToolNumbers.has(parseInt(toolInSlot.toolId)))
+      });
+    }
+    
+    // Combine all tools for table display
+    const allToolsForTable = [
+      ...toolChanges.inMagazine.map(t => ({ ...t, statusClass: 'green', statusLabel: 'Ready' })),
+      ...toolChanges.notInMagazine.map(t => ({ ...t, statusClass: 'yellow', statusLabel: 'No Slot' })),
+      ...toolChanges.unknownTools.map(t => ({ ...t, statusClass: 'red', statusLabel: 'Unknown' }))
+    ];
     
     const statusConfig = {
       red: {
@@ -263,14 +302,14 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
         bgColor: 'rgba(255, 193, 7, 0.1)',
         icon: '🟡',
         title: 'Manual Tool Changes Required',
-        message: `${toolChanges.notInMagazine.length} tool(s) are in ncSender library but not in magazine. These will require manual tool changes.`
+        message: `${toolChanges.notInMagazine.length} tool(s) are in ncSender library but not assigned to slots. These will require manual tool changes.`
       },
       green: {
         color: '#28a745',
         bgColor: 'rgba(40, 167, 69, 0.1)',
         icon: '🟢',
         title: 'All Tools Ready for ATC',
-        message: 'All tools are in ncSender library and assigned to ATC magazine. Original tool numbers will be mapped to ncSender tools.'
+        message: 'All tools are in ncSender library and assigned to slots. Original tool numbers will be mapped to ncSender slots.'
       }
     };
     
@@ -355,13 +394,148 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
           text-transform: uppercase;
         }
         
-        .tool-list {
+        /* Slot Carousel */
+        .slot-carousel-section {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 16px;
+          background: var(--color-surface-muted, #1a1a1a);
+          border-radius: 8px;
+          margin-bottom: 16px;
+          overflow-x: auto;
+        }
+        
+        .slot-box {
           display: flex;
           flex-direction: column;
-          gap: 8px;
-          max-height: 250px;
+          align-items: center;
+          min-width: 60px;
+          height: 60px;
+          background: var(--color-surface, #0a0a0a);
+          border: 2px solid var(--color-border, #444);
+          border-radius: 6px;
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+        
+        .slot-box--used {
+          background: var(--color-accent, #1abc9c);
+          border-color: var(--color-accent, #1abc9c);
+        }
+        
+        .slot-box--unused {
+          background: var(--color-surface-muted, #2a2a2a);
+          border-color: var(--color-border, #444);
+          opacity: 0.5;
+        }
+        
+        .slot-box-content {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex: 1;
+          width: 100%;
+          padding: 0 8px;
+        }
+        
+        .slot-tool-id {
+          font-size: 1rem;
+          font-weight: 700;
+          color: #fff;
+        }
+        
+        .slot-empty {
+          font-size: 1.2rem;
+          color: var(--color-text-secondary, #666);
+        }
+        
+        .slot-box-label {
+          font-size: 0.65rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          color: var(--color-text-secondary, #999);
+          background: var(--color-surface-muted, #1a1a1a);
+          width: 100%;
+          text-align: center;
+          padding: 3px 0;
+          letter-spacing: 0.03em;
+        }
+        
+        .slot-box--used .slot-box-label {
+          background: color-mix(in srgb, var(--color-accent, #1abc9c) 80%, #000);
+          color: rgba(255, 255, 255, 0.95);
+        }
+        
+        /* Tools Table */
+        .tools-table-container {
+          max-height: 400px;
           overflow-y: auto;
-          margin-bottom: 20px;
+          border: 1px solid var(--color-border, #444);
+          border-radius: 8px;
+          margin-bottom: 16px;
+        }
+        
+        .tools-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        
+        .tools-table thead {
+          position: sticky;
+          top: 0;
+          background: var(--color-surface-muted, #1a1a1a);
+          z-index: 10;
+        }
+        
+        .tools-table th {
+          padding: 8px 12px;
+          text-align: left;
+          font-weight: 600;
+          border-bottom: 2px solid var(--color-border, #444);
+          font-size: 0.85rem;
+        }
+        
+        .tools-table td {
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--color-border, #333);
+        }
+        
+        .tools-table tbody tr:hover {
+          background: var(--color-border, #2a2a2a);
+        }
+        
+        .status-badge {
+          display: inline-block;
+          padding: 4px 10px;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          border: 1px solid transparent;
+        }
+        
+        .status-badge--green {
+          background: rgba(40, 167, 69, 0.2);
+          color: #28a745;
+          border-color: #28a745;
+        }
+        
+        .status-badge--yellow {
+          background: rgba(255, 193, 7, 0.2);
+          color: #ffc107;
+          border-color: #ffc107;
+        }
+        
+        .status-badge--red {
+          background: rgba(220, 53, 69, 0.2);
+          color: #dc3545;
+          border-color: #dc3545;
+        }
+        
+        .tool-list {
+          display: none;
         }
         
         .tool-item {
@@ -379,9 +553,37 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
         .tool-item.yellow { border-left-color: #ffc107; }
         .tool-item.red { border-left-color: #dc3545; }
         
-        .tool-number {
-          font-family: monospace;
+        .tool-id-cell {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          align-items: center;
+          justify-content: center;
+          min-width: 80px;
+        }
+        
+        .tool-id-text {
+          font-size: 1rem;
           font-weight: 600;
+        }
+        
+        .tool-number-badge {
+          display: inline-block;
+          padding: 2px 6px;
+          border: 1px solid #f59e0b;
+          border-radius: 3px;
+          background: #f59e0b;
+          color: #000;
+          font-size: 0.65rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          width: fit-content;
+        }
+        
+        .tool-slot-placeholder {
+          font-size: 0.65rem;
+          color: var(--color-text-secondary);
+          opacity: 0.6;
         }
         
         .tool-name {
@@ -581,6 +783,82 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
           background: #ffc107;
           color: #000;
         }
+        
+        /* Slot Selector Popup */
+        .slot-selector-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 99998;
+          display: none;
+        }
+        
+        .slot-selector-overlay.show {
+          display: block;
+        }
+        
+        .slot-selector-popup {
+          position: fixed;
+          background: var(--color-surface, #2a2a2a);
+          border: 1px solid var(--color-border, #444);
+          border-radius: 6px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+          min-width: 200px;
+          max-height: 300px;
+          display: flex;
+          flex-direction: column;
+          z-index: 99999;
+        }
+        
+        .slot-selector-header {
+          padding: 10px 12px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: var(--color-text-secondary, #999);
+          border-bottom: 1px solid var(--color-border, #444);
+          flex-shrink: 0;
+        }
+        
+        .slot-selector-list {
+          overflow-y: auto;
+          flex: 1;
+        }
+        
+        .slot-selector-item {
+          padding: 8px 12px;
+          font-size: 0.85rem;
+          color: var(--color-text-primary, #e0e0e0);
+          cursor: pointer;
+          transition: background 0.1s ease;
+        }
+        
+        .slot-selector-item:hover {
+          background: var(--color-surface-muted, #1a1a1a);
+        }
+        
+        .slot-selector-item--active {
+          background: var(--color-accent, #1abc9c);
+          color: white;
+        }
+        
+        .slot-selector-item--active:hover {
+          background: var(--color-accent, #1abc9c);
+        }
+        
+        .slot-selector-item--occupied {
+          color: #f59e0b;
+        }
+        
+        .tool-id-cell {
+          cursor: pointer;
+          user-select: none;
+        }
+        
+        .tool-id-cell:hover {
+          opacity: 0.8;
+        }
       </style>
       
       <div class="status-container">
@@ -594,47 +872,53 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
         
         <div class="status-message">${config.message}</div>
         
-        <div class="status-stats">
-          <div class="stat-box">
-            <div class="stat-value blue">${toolChanges.allTools.length}</div>
-            <div class="stat-label">Total Tools</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-value green">${toolChanges.inMagazine.length}</div>
-            <div class="stat-label">In ATC</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-value yellow">${toolChanges.notInMagazine.length}</div>
-            <div class="stat-label">Manual</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-value red">${toolChanges.unknownTools.length}</div>
-            <div class="stat-label">Unknown</div>
-          </div>
+        <!-- Slot Carousel -->
+        <div class="slot-carousel-section">
+          ${slotState.map(slot => `
+            <div class="slot-box ${slot.tool ? (slot.isUsed ? 'slot-box--used' : 'slot-box--unused') : ''}">
+              <div class="slot-box-content">
+                ${slot.tool ? `<span class="slot-tool-id">#${slot.tool.toolId}</span>` : `<span class="slot-empty">—</span>`}
+              </div>
+              <div class="slot-box-label">SLOT${slot.slotNumber}</div>
+            </div>
+          `).join('')}
         </div>
         
-        <div class="tool-list">
-          ${toolChanges.inMagazine.map(t => `
-            <div class="tool-item green">
-              <div class="tool-number">T${t.toolNumber}</div>
-              <div class="tool-name">${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</div>
-              <button class="tool-map-btn mapped" data-tool="${t.toolNumber}" data-current-pocket="${t.pocketNumber}">→ T${t.pocketNumber}</button>
-            </div>
-          `).join('')}
-          ${toolChanges.notInMagazine.map(t => `
-            <div class="tool-item yellow">
-              <div class="tool-number">T${t.toolNumber}</div>
-              <div class="tool-name">${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</div>
-              <button class="tool-map-btn ${t.manualMapping ? 'manual' : ''}" data-tool="${t.toolNumber}" data-current-pocket="">${t.manualMapping ? 'Manual' : 'Map'}</button>
-            </div>
-          `).join('')}
-          ${toolChanges.unknownTools.map(t => `
-            <div class="tool-item red">
-              <div class="tool-number">T${t.toolNumber}</div>
-              <div class="tool-name">Unknown Tool</div>
-              <button class="tool-map-btn" data-tool="${t.toolNumber}" data-current-pocket="">Map</button>
-            </div>
-          `).join('')}
+        <!-- Tools Table -->
+        <div class="tools-table-container">
+          <table class="tools-table">
+            <thead>
+              <tr>
+                <th>Tool ID</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th>Diameter</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${allToolsForTable.map(t => {
+                const slotBadge = t.pocketNumber !== null && t.pocketNumber !== undefined
+                  ? `<span class="tool-number-badge">Slot${t.pocketNumber}</span>`
+                  : `<span class="tool-slot-placeholder">No Slot</span>`;
+                
+                return `
+                  <tr class="tool-row tool-row--${t.statusClass}">
+                    <td>
+                      <div class="tool-id-cell">
+                        <span class="tool-id-text">${t.toolNumber}</span>
+                        ${slotBadge}
+                      </div>
+                    </td>
+                    <td>${t.toolInfo ? t.toolInfo.name : `Tool ${t.toolNumber}`}</td>
+                    <td>${t.toolInfo ? t.toolInfo.type : '-'}</td>
+                    <td>${t.toolInfo ? t.toolInfo.diameter.toFixed(2) + ' mm' : '-'}</td>
+                    <td><span class="status-badge status-badge--${t.statusClass}">${t.statusLabel}</span></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
         </div>
         
         <div class="actions">
@@ -645,145 +929,264 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
         </div>
       </div>
       
-      <!-- Custom mapping modal -->
-      <div id="mappingModal" class="mapping-modal">
-        <div class="mapping-modal-content">
-          <h3 id="mappingModalTitle">Map Tool</h3>
-          <label for="pocketSelect">Select target ATC pocket:</label>
-          <select id="pocketSelect" class="pocket-select">
-            <option value="">None (Not in magazine)</option>
-            ${availablePockets.map(pocket => `
-              <option value="${pocket.number}">T${pocket.number}</option>
-            `).join('')}
-          </select>
-          <div class="mapping-modal-actions">
-            <button class="cancel-btn" id="modalCancelBtn">Cancel</button>
-            <button class="confirm-btn" id="modalConfirmBtn">Confirm</button>
+      <!-- Slot Selector Popup -->
+      <div id="slotSelectorOverlay" class="slot-selector-overlay">
+        <div id="slotSelectorPopup" class="slot-selector-popup">
+          <div class="slot-selector-header">Assign to Slot</div>
+          <div class="slot-selector-list" id="slotSelectorList">
+            <!-- Populated dynamically -->
           </div>
         </div>
       </div>
-      
+
       <script>
         (function() {
-          const pluginId = 'com.ncsender.fusion360-import';
-          const mappingModal = document.getElementById('mappingModal');
-          const modalTitle = document.getElementById('mappingModalTitle');
-          const pocketSelect = document.getElementById('pocketSelect');
-          const modalCancelBtn = document.getElementById('modalCancelBtn');
-          const modalConfirmBtn = document.getElementById('modalConfirmBtn');
+          // Session mappings for tools not in library (temporary, won't persist)
+          const sessionMappings = ${JSON.stringify(sessionMappings || {})};
           
-          let currentToolNumber = null;
-          let currentToolInfo = null;
+          // Tool data and slot state
+          const allToolsData = ${JSON.stringify(allToolsForTable)};
+          const magazineSize = ${magazineSize};
+          const toolLibrary = ${JSON.stringify(Object.fromEntries(
+            Object.values(toolLibrary).map(t => [t.toolId, t])
+          ))};
           
-          // Show custom modal
-          function showMappingModal(toolNumber, toolInfo, currentPocket) {
-            currentToolNumber = toolNumber;
-            currentToolInfo = toolInfo;
-            
-            const isRemapping = currentPocket && currentPocket !== '';
-            modalTitle.textContent = isRemapping 
-              ? \`Remap Fusion Tool T\${toolNumber} (currently T\${currentPocket})\`
-              : \`Map Fusion Tool T\${toolNumber}\`;
-            
-            // Pre-select current pocket or default to empty (None)
-            pocketSelect.value = currentPocket || '';
-            
-            mappingModal.classList.add('show');
-            setTimeout(() => pocketSelect.focus(), 100);
-          }
+          let currentTool = null;
+          const overlay = document.getElementById('slotSelectorOverlay');
+          const popup = document.getElementById('slotSelectorPopup');
+          const listContainer = document.getElementById('slotSelectorList');
           
-          // Hide modal
-          function hideMappingModal() {
-            mappingModal.classList.remove('show');
-            currentToolNumber = null;
-            currentToolInfo = null;
-          }
-          
-          // Handle Enter key in select
-          pocketSelect.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-              modalConfirmBtn.click();
-            }
-          });
-          
-          // Handle Escape key
-          document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && mappingModal.classList.contains('show')) {
-              hideMappingModal();
-            }
-          });
-          
-          // Modal cancel button
-          modalCancelBtn.addEventListener('click', () => {
-            hideMappingModal();
-          });
-          
-          // Modal confirm button
-          modalConfirmBtn.addEventListener('click', async () => {
-            const selectedValue = pocketSelect.value;
+          // Show slot selector
+          function showSlotSelector(toolData, event) {
+            currentTool = toolData;
             
-            // Capture data BEFORE hiding modal
-            const toolNumberToMap = currentToolNumber;
-            const toolInfo = currentToolInfo;
+            // Build slot list
+            let html = \`
+              <div class="slot-selector-item \${toolData.pocketNumber === null ? 'slot-selector-item--active' : ''}" data-slot="">
+                None (Not in magazine)
+              </div>
+            \`;
             
-            // Handle "None (Not in magazine)" selection
-            // Use -1 as sentinel value for "not in magazine" (null gets stripped by API)
-            const pocketNumber = selectedValue === '' ? -1 : parseInt(selectedValue, 10);
-            console.log(\`[Mapping] Confirm clicked: T\${toolNumberToMap} → \${pocketNumber === -1 ? 'None' : 'T' + pocketNumber}\`);
-            
-            hideMappingModal();
-            
-            try {
-              // 1. Load current settings
-              console.log('[Mapping] Loading current settings...');
-              const response = await fetch('/api/plugins/' + pluginId + '/settings');
-              const settings = response.ok ? await response.json() : {};
-              console.log('[Mapping] Current settings:', settings);
+            for (let i = 1; i <= magazineSize; i++) {
+              // Check for library tool in this slot
+              const toolInSlot = Object.values(toolLibrary).find(t => t.toolNumber === i);
               
-              // 2. Update manual mappings in plugin settings
-              const manualMappings = settings.manualToolMappings || {};
+              // Check for unknown tool (session mapping) in this slot
+              const unknownToolInSlot = Object.keys(sessionMappings).find(key => sessionMappings[key] === i);
               
-              // Clean up any invalid keys
-              if (manualMappings.hasOwnProperty('null')) delete manualMappings['null'];
-              if (manualMappings.hasOwnProperty(null)) delete manualMappings[null];
+              const isOccupied = (toolInSlot && toolInSlot.toolId !== toolData.toolNumber) || 
+                                 (unknownToolInSlot && parseInt(unknownToolInSlot) !== toolData.toolNumber);
+              const isActive = toolData.pocketNumber === i;
               
-              // Set the mapping (-1 means explicitly "not in magazine")
-              manualMappings[toolNumberToMap] = pocketNumber;
-              console.log(\`[Mapping] Set manual mapping for tool \${toolNumberToMap} to \${pocketNumber === -1 ? 'None' : pocketNumber}\`);
-              console.log('[Mapping] Updated mappings:', manualMappings);
-              
-              // 3. Save plugin settings
-              console.log('[Mapping] Saving plugin settings...');
-              const saveResponse = await fetch('/api/plugins/' + pluginId + '/settings', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ manualToolMappings: manualMappings })
-              });
-              console.log('[Mapping] Plugin settings save response:', saveResponse.status);
-              
-              if (!saveResponse.ok) {
-                const errorText = await saveResponse.text();
-                throw new Error(\`Failed to save plugin settings: HTTP \${saveResponse.status}: \${errorText}\`);
+              let occupiedInfo = '';
+              if (toolInSlot && toolInSlot.toolId !== toolData.toolNumber) {
+                occupiedInfo = \` (Swap with #\${toolInSlot.toolId})\`;
+              } else if (unknownToolInSlot && parseInt(unknownToolInSlot) !== toolData.toolNumber) {
+                occupiedInfo = \` (Swap with T\${unknownToolInSlot})\`;
               }
               
-              console.log('[Mapping] Manual mapping saved (library will sync when "Map Tools" is clicked)');
+              html += \`
+                <div class="slot-selector-item \${isActive ? 'slot-selector-item--active' : ''} \${isOccupied ? 'slot-selector-item--occupied' : ''}" data-slot="\${i}">
+                  Slot\${i}\${occupiedInfo}
+                </div>
+              \`;
+            }
+            
+            listContainer.innerHTML = html;
+            
+            // Position popup near click
+            const rect = event.target.closest('.tool-id-cell').getBoundingClientRect();
+            popup.style.top = (rect.bottom + 5) + 'px';
+            popup.style.left = rect.left + 'px';
+            
+            overlay.classList.add('show');
+          }
+          
+          // Close slot selector
+          function closeSlotSelector() {
+            overlay.classList.remove('show');
+            currentTool = null;
+          }
+          
+          // Handle slot selection
+          async function selectSlot(slotNumber) {
+            if (!currentTool) return;
+            
+            const toolNumber = currentTool.toolNumber;
+            const toolInfo = currentTool.toolInfo;
+            const oldSlotNumber = currentTool.pocketNumber;
+            
+            // If same slot, just close
+            if (slotNumber === oldSlotNumber) {
+              closeSlotSelector();
+              return;
+            }
+            
+            closeSlotSelector();
+            
+            try {
+              if (toolInfo) {
+                // Tool in library - update it (persists)
+                console.log(\`[Slot] Updating tool #\${toolInfo.toolId} from Slot \${oldSlotNumber || 'none'} → Slot \${slotNumber || 'none'}\`);
+                
+                // Check if target slot is occupied by another tool (in library OR session mapping)
+                const conflictingTool = slotNumber !== null
+                  ? Object.values(toolLibrary).find(t => t.toolNumber === slotNumber && t.id !== toolInfo.id)
+                  : null;
+                
+                // Also check if an unknown tool (session mapping) occupies this slot
+                const conflictingUnknownToolNumber = slotNumber !== null
+                  ? Object.keys(sessionMappings).find(key => sessionMappings[key] === slotNumber)
+                  : null;
+                
+                if (conflictingTool) {
+                  // 3-step swap process with library tool (matching ncSender behavior):
+                  // Step 1: Unassign conflicting tool temporarily
+                  console.log(\`[Slot] Step 1: Unassigning #\${conflictingTool.toolId} from Slot \${slotNumber}\`);
+                  await fetch(\`/api/tools/\${conflictingTool.id}\`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...conflictingTool, toolNumber: null })
+                  });
+                  
+                  // Step 2: Assign current tool to new slot
+                  console.log(\`[Slot] Step 2: Assigning #\${toolInfo.toolId} to Slot \${slotNumber}\`);
+                  await fetch(\`/api/tools/\${toolInfo.id}\`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...toolInfo, toolNumber: slotNumber })
+                  });
+                  
+                  // Step 3: Assign conflicting tool to old slot (complete the swap)
+                  if (oldSlotNumber !== null) {
+                    console.log(\`[Slot] Step 3: Assigning #\${conflictingTool.toolId} to Slot \${oldSlotNumber}\`);
+                    await fetch(\`/api/tools/\${conflictingTool.id}\`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ ...conflictingTool, toolNumber: oldSlotNumber })
+                    });
+                  }
+                } else if (conflictingUnknownToolNumber) {
+                  // Swap with unknown tool (session mapping only)
+                  console.log(\`[Slot] Swapping with unknown tool T\${conflictingUnknownToolNumber} (session mapping)\`);
+                  
+                  // Update session mapping for unknown tool (key is already a string from Object.keys)
+                  if (oldSlotNumber !== null) {
+                    console.log(\`[Slot] Moving unknown tool T\${conflictingUnknownToolNumber} from Slot \${slotNumber} to Slot \${oldSlotNumber}\`);
+                    sessionMappings[conflictingUnknownToolNumber] = oldSlotNumber;
+                  } else {
+                    console.log(\`[Slot] Removing unknown tool T\${conflictingUnknownToolNumber} from Slot \${slotNumber}\`);
+                    delete sessionMappings[conflictingUnknownToolNumber];
+                  }
+                  
+                  // Assign current tool to new slot
+                  console.log(\`[Slot] Assigning #\${toolInfo.toolId} to Slot \${slotNumber}\`);
+                  await fetch(\`/api/tools/\${toolInfo.id}\`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...toolInfo, toolNumber: slotNumber })
+                  });
+                } else {
+                  // Simple assignment, no swap needed
+                  console.log(\`[Slot] Simple assignment: #\${toolInfo.toolId} → Slot \${slotNumber || 'none'}\`);
+                  await fetch(\`/api/tools/\${toolInfo.id}\`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...toolInfo, toolNumber: slotNumber })
+                  });
+                }
+              } else {
+                // Tool not in library - temporary mapping (doesn't persist)
+                console.log(\`[Slot] Temporary mapping for unknown tool T\${toolNumber} → Slot \${slotNumber || 'none'}\`);
+                
+                if (slotNumber === null) {
+                  // Removing slot assignment for unknown tool
+                  console.log(\`[Slot] Removing slot assignment for unknown tool T\${toolNumber}\`);
+                  delete sessionMappings[String(toolNumber)];
+                } else {
+                  // Check if target slot is occupied
+                  const conflictingTool = Object.values(toolLibrary).find(t => t.toolNumber === slotNumber);
+                  
+                  const toolNumberKey = String(toolNumber);
+                  const conflictingUnknownToolNumber = Object.keys(sessionMappings).find(key => 
+                    sessionMappings[key] === slotNumber && key !== toolNumberKey
+                  );
+                  
+                  if (conflictingTool) {
+                    // Swap with library tool
+                    console.log(\`[Slot] Swapping unknown tool T\${toolNumber} with library tool #\${conflictingTool.toolId}\`);
+                    
+                    // Update library tool
+                    if (oldSlotNumber !== null) {
+                      await fetch(\`/api/tools/\${conflictingTool.id}\`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...conflictingTool, toolNumber: oldSlotNumber })
+                      });
+                    } else {
+                      await fetch(\`/api/tools/\${conflictingTool.id}\`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...conflictingTool, toolNumber: null })
+                      });
+                    }
+                    
+                    // Update session mapping (use string key)
+                    sessionMappings[toolNumberKey] = slotNumber;
+                  } else if (conflictingUnknownToolNumber) {
+                    // Swap two unknown tools
+                    console.log(\`[Slot] Swapping unknown tools T\${toolNumber} ↔ T\${conflictingUnknownToolNumber}\`);
+                    
+                    if (oldSlotNumber !== null) {
+                      sessionMappings[conflictingUnknownToolNumber] = oldSlotNumber;
+                    } else {
+                      delete sessionMappings[conflictingUnknownToolNumber];
+                    }
+                    
+                    sessionMappings[toolNumberKey] = slotNumber;
+                  } else {
+                    // Simple assignment to slot (use string key)
+                    sessionMappings[toolNumberKey] = slotNumber;
+                  }
+                }
+              }
+              
+              // Refresh dialog
+              window.parent.postMessage({
+                type: 'close-plugin-dialog',
+                data: { action: 'refresh', sessionMappings: sessionMappings }
+              }, '*');
               
             } catch (error) {
-              console.error('[Mapping] Error:', error);
-              alert('Failed to save mapping: ' + error.message);
-            } finally {
-              // Always refresh the dialog (even if there was an error)
-              // Add a small delay to ensure file system writes are complete
-              console.log('[Mapping] Refreshing dialog...');
-              setTimeout(() => {
-                window.parent.postMessage({ 
-                  type: 'close-plugin-dialog',
-                  data: { action: 'refresh' }
-                }, '*');
-              }, 150);
+              console.error('[Slot] Error:', error);
+              alert('Failed to update slot: ' + error.message);
             }
+          }
+          
+          // Event listeners
+          overlay.addEventListener('click', closeSlotSelector);
+          
+          popup.addEventListener('click', (e) => {
+            e.stopPropagation();
           });
           
+          // Tool ID cell clicks
+          document.querySelectorAll('.tool-id-cell').forEach((cell, index) => {
+            cell.addEventListener('click', (e) => {
+              showSlotSelector(allToolsData[index], e);
+            });
+          });
+          
+          // Slot selector item clicks
+          listContainer.addEventListener('click', (e) => {
+            const item = e.target.closest('.slot-selector-item');
+            if (item) {
+              const slotStr = item.getAttribute('data-slot');
+              const slotNumber = slotStr === '' ? null : parseInt(slotStr, 10);
+              selectSlot(slotNumber);
+            }
+          });
+
           document.getElementById('bypassBtn').addEventListener('click', () => {
             window.parent.postMessage({ 
               type: 'close-plugin-dialog',
@@ -798,23 +1201,6 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
             }, '*');
           });
           
-          // Store tool info as JSON in data attributes (ALL tools, not just unmapped)
-          const toolDataMap = ${JSON.stringify(Object.fromEntries(
-            toolChanges.allTools.map(t => [
-              t.toolNumber,
-              t.toolInfo || null
-            ])
-          ))};
-          
-          // Handle Map button clicks
-          document.querySelectorAll('.tool-map-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-              const fusionToolNumber = parseInt(e.target.getAttribute('data-tool'), 10);
-              const currentPocket = e.target.getAttribute('data-current-pocket');
-              const toolInfo = toolDataMap[fusionToolNumber];
-              showMappingModal(fusionToolNumber, toolInfo, currentPocket);
-            });
-          });
         })();
       </script>
     `;
@@ -826,14 +1212,14 @@ async function showStatusDialog(filename, toolChanges, status, settings, content
     
     pluginContext.log(`Dialog resolved with response:`, JSON.stringify(response));
     
-    // Extract action from response (default to 'bypass' if no response)
+    // Return full response (includes action and sessionMappings)
     if (response && response.action) {
-      pluginContext.log(`Returning action: ${response.action}`);
-      return response.action;
+      pluginContext.log(`Returning response with action: ${response.action}`);
+      return response;
     }
     
     pluginContext.log('No action in response, defaulting to bypass');
-    return 'bypass';
+    return { action: 'bypass' };
 }
 
 /**
@@ -874,7 +1260,11 @@ async function syncToolLibraryWithMappings(toolChanges, ctx) {
     
     // Update tools that are in magazine
     toolChanges.inMagazine.forEach(toolData => {
-      const toolIndex = allTools.findIndex(t => t.id === toolData.toolNumber);
+      // Handle migration: use toolId if available, fallback to id for old tools
+      const toolIndex = allTools.findIndex(t => {
+        const toolId = t.toolId !== undefined ? t.toolId : t.id;
+        return toolId === toolData.toolNumber;
+      });
       if (toolIndex >= 0) {
         const oldPocket = allTools[toolIndex].toolNumber;
         const newPocket = toolData.pocketNumber;
@@ -890,7 +1280,11 @@ async function syncToolLibraryWithMappings(toolChanges, ctx) {
     // Update tools that are manually set to not in magazine (pocket = -1)
     toolChanges.notInMagazine.forEach(toolData => {
       if (toolData.manualMapping) {
-        const toolIndex = allTools.findIndex(t => t.id === toolData.toolNumber);
+        // Handle migration: use toolId if available, fallback to id for old tools
+        const toolIndex = allTools.findIndex(t => {
+          const toolId = t.toolId !== undefined ? t.toolId : t.id;
+          return toolId === toolData.toolNumber;
+        });
         if (toolIndex >= 0) {
           const oldPocket = allTools[toolIndex].toolNumber;
           
@@ -968,9 +1362,9 @@ function performTranslation(lines, toolChanges, settings, ctx) {
       if (pocketNumber !== undefined) {
         translatedLine = translatedLine.replace(/T\d+/i, `T${pocketNumber}`);
         wasTranslated = true;
-        
+
         // Only log M6 commands to avoid spam
-        if (/M0?6/i.test(line)) {
+        if (M6_PATTERN.test(line)) {
           ctx.log(`  T${toolNumber} → T${pocketNumber}`);
         }
       }
@@ -1035,7 +1429,11 @@ async function loadToolLibrary() {
     }
     
     tools.forEach(tool => {
-      library[tool.id] = tool;
+      // Handle migration: if toolId is missing, use id as fallback (for old tools)
+      const toolId = tool.toolId !== undefined ? tool.toolId : tool.id;
+      if (toolId !== undefined) {
+        library[toolId] = tool;
+      }
     });
     
     pluginContext.log(`Loaded ${tools.length} tool(s) from library`);
