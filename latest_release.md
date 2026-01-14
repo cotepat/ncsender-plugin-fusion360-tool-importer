@@ -2,9 +2,9 @@
 
 ## ⚠️ Important Note
 
-**G-Code Translation & Tool Mapping**: The functionality for mapping tools to ATC slots when loading G-code programs has been moved to a separate plugin: **[ncSender G-Code Translator](https://github.com/cotepat/ncsender-plugin-gcode-translator)**
+**G-Code Translation & Tool Mapping**: The functionality for mapping tools to ATC slots when loading G-code programs has been moved to a separate plugin: **[Dynamic Tool Slot Mapper](https://github.com/cotepat/ncsender-plugin-dynamic-tool-slot-mapper)**
 
-This plugin now focuses exclusively on **importing tool libraries** from Fusion 360. For automatic tool number translation and slot mapping when loading G-code files, please install the separate G-Code Translator plugin.
+This plugin now focuses exclusively on **importing tool libraries** from Fusion 360. For automatic tool number translation and slot mapping when loading G-code files, please install the separate Dynamic Tool Slot Mapper plugin.
 
 ## What's New
 
