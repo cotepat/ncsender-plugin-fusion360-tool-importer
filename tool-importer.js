@@ -27,6 +27,7 @@ export function showImportDialog() {
   const html = `
     <style>
       .fusion-import-container {
+        position: relative;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
         color: var(--color-text-primary, #e0e0e0);
         padding: 20px;
@@ -290,6 +291,42 @@ export function showImportDialog() {
       
       .fusion-hidden {
         display: none;
+      }
+      
+      .fusion-confirm-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+      }
+      
+      .fusion-confirm-dialog {
+        background: var(--color-surface, #1e1e1e);
+        border: 1px solid var(--color-border, #444);
+        border-radius: 8px;
+        padding: 24px;
+        max-width: 400px;
+        width: 90%;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      }
+      
+      .fusion-confirm-message {
+        color: var(--color-text-primary, #e0e0e0);
+        font-size: 1rem;
+        margin-bottom: 24px;
+        line-height: 1.5;
+      }
+      
+      .fusion-confirm-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
       }
     </style>
     
@@ -937,8 +974,73 @@ export function showImportDialog() {
           }
         }
         
+        function showConfirmDialog(message) {
+          return new Promise((resolve) => {
+            const container = document.querySelector('.fusion-import-container');
+            if (!container) {
+              resolve(false);
+              return;
+            }
+            
+            // Prevent scrolling on the container
+            const originalOverflow = container.style.overflow;
+            container.style.overflow = 'hidden';
+            
+            const overlay = document.createElement('div');
+            overlay.className = 'fusion-confirm-overlay';
+            overlay.innerHTML = \`
+              <div class="fusion-confirm-dialog">
+                <div class="fusion-confirm-message">\${message}</div>
+                <div class="fusion-confirm-actions">
+                  <button class="fusion-btn fusion-btn-secondary" id="confirmCancel">Cancel</button>
+                  <button class="fusion-btn fusion-btn-primary" id="confirmOK">OK</button>
+                </div>
+              </div>
+            \`;
+            
+            container.appendChild(overlay);
+            
+            const cleanup = () => {
+              if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+              }
+              container.style.overflow = originalOverflow;
+            };
+            
+            const handleCancel = () => {
+              cleanup();
+              resolve(false);
+            };
+            
+            const handleOK = () => {
+              cleanup();
+              resolve(true);
+            };
+            
+            overlay.querySelector('#confirmCancel').addEventListener('click', handleCancel);
+            overlay.querySelector('#confirmOK').addEventListener('click', handleOK);
+            
+            // Close on overlay click (outside dialog)
+            overlay.addEventListener('click', (e) => {
+              if (e.target === overlay) {
+                handleCancel();
+              }
+            });
+            
+            // Close on Escape key
+            const handleEscape = (e) => {
+              if (e.key === 'Escape') {
+                handleCancel();
+                document.removeEventListener('keydown', handleEscape);
+              }
+            };
+            document.addEventListener('keydown', handleEscape);
+          });
+        }
+        
         async function deleteLibrary() {
-          if (!confirm('Are you sure you want to delete ALL tools from the current library?')) {
+          const confirmed = await showConfirmDialog('Are you sure you want to delete ALL tools from the current library?');
+          if (!confirmed) {
             return;
           }
           

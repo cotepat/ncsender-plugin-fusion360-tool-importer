@@ -1,13 +1,14 @@
 {
   "id": "com.ncsender.fusion360-import",
   "name": "Fusion 360 Tool Library Import",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "minAppVersion": "0.3.131",
   "author": "ncSender",
-  "description": "Import tool libraries from Fusion 360 and translate G-code with visual slot management",
+  "description": "Import tool libraries from Fusion 360 (JSON exports or clipboard)",
   "entry": "index.js",
   "icon": "logo.png",
   "category": "utility",
-  "events": ["onGcodeProgramLoad"],
+  "repository": "https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer",
+  "events": [],
   "permissions": []
 }

@@ -19,7 +19,6 @@ mkdir -p "${PLUGIN_DIR}"
 # Copy plugin files
 cp manifest.json "${PLUGIN_DIR}/"
 cp index.js "${PLUGIN_DIR}/"
-cp gcode-translator.js "${PLUGIN_DIR}/"
 cp tool-importer.js "${PLUGIN_DIR}/"
 
 # Include logo if it exists

@@ -140,36 +140,6 @@ Fusion 360's `assemblyGaugeLength` is for CAM simulation only and does not repre
 - Fusion 360's `turret` field is ignored for existing tools
 - If a tool has `turret = 0` in Fusion 360, it will be imported without a slot assignment
 
-### Using the G-code Translator
-
-When you load a Fusion 360 G-code file, the plugin automatically:
-
-1. **Analyzes Tools**: Scans for all tool changes (T## M6 commands)
-2. **Shows Visual Slot Carousel**: Displays all ATC slots with color coding:
-   - **Green**: Tool is in this slot AND used in the G-code
-   - **Grey**: Tool is in this slot but NOT used in the G-code
-   - **Empty (—)**: No tool assigned to this slot
-3. **Displays Tool Table**: Lists all tools with their current status
-4. **Interactive Mapping**: Click any tool row to reassign its slot
-
-#### Assigning Tool Slots
-
-**To assign a tool to a slot:**
-1. Click the tool's row in the table
-2. Select target slot from dropdown
-3. If slot is occupied, you'll see "Swap with #XX" - select it to swap
-4. Dialog refreshes automatically to show new assignments
-
-**Unknown Tools** (not in your library):
-- Can be mapped to slots temporarily (for this G-code only)
-- Session mappings don't persist after closing
-- Shows with red "Unknown" status badge
-
-**Smart Slot Swapping:**
-- Automatically handles conflicts when two tools want the same slot
-- 3-step swap process prevents conflicts
-- Works for library tools, unknown tools, or combinations
-
 ## Support
 
 - **Documentation**: See [README.md](README.md) for full documentation
