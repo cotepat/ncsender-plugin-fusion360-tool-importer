@@ -639,7 +639,15 @@ export function showImportDialog() {
             const char = line[i];
             
             if (char === '"') {
-              inQuotes = !inQuotes;
+              // Check if this is an escaped quote (two quotes in a row)
+              if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+                // This is an escaped quote - add one quote to output and skip the next one
+                current += '"';
+                i++; // Skip the next quote
+              } else {
+                // This is a field delimiter quote - toggle inQuotes state
+                inQuotes = !inQuotes;
+              }
             } else if (char === '\\t' && !inQuotes) {
               values.push(current);
               current = '';
@@ -658,8 +666,8 @@ export function showImportDialog() {
             const index = columnMap[columnName];
             if (index === undefined || index >= values.length) return '';
             const value = values[index];
-            // Remove surrounding quotes if present
-            return value.replace(/^"|"$/g, '').trim();
+            // Parser already handles escaped quotes, just trim
+            return value.trim();
           };
           
           // Get required fields
@@ -701,12 +709,25 @@ export function showImportDialog() {
             }
           }
           
-          // Get diameter
+          // Get diameter and unit
           const diameterStr = getValue('Diameter (tool_diameter)');
           const diameter = parseFloat(diameterStr);
           if (isNaN(diameter) || diameter <= 0) {
             throw new Error(\`Invalid diameter: \${diameterStr}\`);
           }
+          
+          // Get unit and convert to mm if needed
+          const unitStr = getValue('Unit (tool_unit)') || '';
+          const unit = unitStr.toLowerCase().trim();
+          
+          let diameterInMm = diameter;
+          if (unit.includes('inch')) {
+            // Convert inches to millimeters
+            diameterInMm = diameter * 25.4;
+          }
+          
+          // Round to 0.00001 mm precision to avoid floating point errors
+          diameterInMm = Math.round(diameterInMm * 100000) / 100000;
           
           // Get type
           const toolType = getValue('Type (tool_type)') || '';
@@ -743,7 +764,7 @@ export function showImportDialog() {
             toolNumber: toolNumber,
             name: description.trim(),
             type: ncSenderType,
-            diameter: diameter,
+            diameter: diameterInMm,
             offsets: { tlo: 0, x: 0, y: 0, z: 0 },
             metadata: {
               notes: comment,
@@ -774,6 +795,20 @@ export function showImportDialog() {
             throw new Error(\`Invalid diameter: \${diameter}\`);
           }
           
+          // Get unit and convert to mm if needed
+          // Check expressions.tool_unit (can be "'millimeters'" or "'inches'" with quotes)
+          const toolUnit = fusionTool.expressions?.tool_unit || '';
+          let diameterInMm = diameter;
+          // Remove quotes and single quotes, then check if it's inches
+          const unitStr = toolUnit.replace(/['"]/g, '').toLowerCase().trim();
+          if (unitStr.includes('inch')) {
+            // Convert inches to millimeters
+            diameterInMm = diameter * 25.4;
+          }
+          
+          // Round to 0.00001 mm precision to avoid floating point errors
+          diameterInMm = Math.round(diameterInMm * 100000) / 100000;
+          
           let description = fusionTool.description || '';
           if (!description || description.trim() === '') {
             // Try preset name as fallback (matches TSV import behavior)
@@ -798,7 +833,7 @@ export function showImportDialog() {
             toolNumber: toolNumber,
             name: description.trim(),
             type: ncSenderType,
-            diameter: diameter,
+            diameter: diameterInMm,
             offsets: { tlo: 0, x: 0, y: 0, z: 0 },
             metadata: {
               notes: fusionTool['post-process']?.comment || '',
@@ -870,7 +905,7 @@ export function showImportDialog() {
                 <td>\${toolIdCell}</td>
                 <td>\${item.tool.name}</td>
                 <td>\${item.tool.type}</td>
-                <td>\${item.tool.diameter.toFixed(2)} mm</td>
+                <td>\${item.tool.diameter.toFixed(3)} mm</td>
                 <td>\${changesDisplay}</td>
               </tr>
             \`;

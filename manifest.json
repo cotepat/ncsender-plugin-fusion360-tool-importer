@@ -1,7 +1,7 @@
 {
   "id": "com.ncsender.fusion360-import",
   "name": "Fusion 360 Tool Library Import",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "minAppVersion": "0.3.131",
   "author": "ncSender",
   "description": "Import tool libraries from Fusion 360 (JSON exports or clipboard)",
