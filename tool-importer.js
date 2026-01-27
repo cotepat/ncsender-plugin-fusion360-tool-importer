@@ -796,8 +796,13 @@ export function showImportDialog() {
           }
           
           // Get unit and convert to mm if needed
-          // Check expressions.tool_unit (can be "'millimeters'" or "'inches'" with quotes)
-          const toolUnit = fusionTool.expressions?.tool_unit || '';
+          // Check two possible locations:
+          // 1. expressions.tool_unit (can be "'millimeters'" or "'inches'" with quotes)
+          // 2. unit field at top level (can be "millimeters" or "inches")
+          const toolUnitFromExpressions = fusionTool.expressions?.tool_unit || '';
+          const toolUnitFromRoot = fusionTool.unit || '';
+          const toolUnit = toolUnitFromExpressions || toolUnitFromRoot;
+          
           let diameterInMm = diameter;
           // Remove quotes and single quotes, then check if it's inches
           const unitStr = toolUnit.replace(/['"]/g, '').toLowerCase().trim();

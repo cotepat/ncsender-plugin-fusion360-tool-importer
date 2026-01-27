@@ -1,4 +1,4 @@
-# Fusion 360 Tool Library Import v2.3.0
+# Fusion 360 Tool Library Import v2.3.1
 
 ## ⚠️ Important Note
 
@@ -8,9 +8,17 @@ This plugin now focuses exclusively on **importing tool libraries** from Fusion 
 
 ## What's New
 
-This release adds full support for imperial units (inches) in Fusion 360 tool libraries, ensuring accurate conversion to ncSender's internal metric format.
+This patch release fixes unit detection for Fusion 360 JSON exports that use the top-level `unit` field instead of `expressions.tool_unit`.
 
-### ✨ New Features
+### 🐛 Bug Fixes
+
+#### Unit Detection Compatibility
+- Fixed unit detection to support both Fusion 360 JSON export formats:
+  - `expressions.tool_unit` field (older format with quoted values like `"'inches'"`)
+  - `unit` field at top level (newer format with direct values like `"inches"`)
+- Ensures all Fusion 360 exports work regardless of version or export format
+
+### ✨ Features (from v2.3.0)
 
 #### Imperial Unit Support
 - **Automatic unit detection**: Reads `tool_unit` field from both JSON and clipboard imports
@@ -72,4 +80,4 @@ This release adds full support for imperial units (inches) in Fusion 360 tool li
 
 ---
 
-**Full Changelog**: https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/compare/v2.2.0...v2.3.0
+**Full Changelog**: https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/compare/v2.3.0...v2.3.1

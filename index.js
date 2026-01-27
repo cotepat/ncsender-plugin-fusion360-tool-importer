@@ -3,7 +3,7 @@
  * 
  * This plugin imports tool libraries from Fusion 360 JSON exports.
  * 
- * Version: 2.3.0
+ * Version: 2.3.1
  */
 
 import * as toolImporter from './tool-importer.js';
@@ -20,7 +20,7 @@ export function onLoad(ctx) {
     toolImporter.showImportDialog();
   }, { icon: 'logo.png' });
   
-  ctx.log('Fusion 360 Tool Importer v2.3.0 loaded');
+  ctx.log('Fusion 360 Tool Importer v2.3.1 loaded');
 }
 
 /**
