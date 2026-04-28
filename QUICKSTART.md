@@ -8,13 +8,10 @@ Once published, you'll be able to install directly from ncSender's Plugin Manage
 ### Option 2: Manual Installation
 
 1. Download the latest release from [GitHub Releases](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/releases)
-2. Locate your ncSender plugins directory:
-   - **macOS**: `~/Library/Application Support/ncSender/plugins/`
-   - **Windows**: `%APPDATA%\ncSender\plugins\`
-   - **Linux**: `~/.config/ncSender/plugins/`
-3. Extract the downloaded ZIP file into the plugins directory
-4. Restart ncSender
-5. Access via **Plugins → Fusion 360 Tool Importer** menu
+2. Open ncSender → settings (gear icon) → **Plugins** tab → **Install Plugin** → select the downloaded zip
+3. Access via **Plugins → Fusion 360 Tool Importer** menu
+
+> Manual install path (advanced): `~/Library/Application Support/ncSender/plugins/` (macOS), `%APPDATA%\ncSender\plugins\` (Windows), `~/.config/ncSender/plugins/` (Linux). The in-app installer is preferred.
 
 ## For Developers: Setting Up for Development
 
@@ -38,7 +35,7 @@ cd ncsender-plugin-fusion360-tool-importer
 
 ### 3. Make Changes
 
-1. Edit `index.js` to modify plugin behavior
+1. Edit `import.html` to modify the plugin's UI, parsing, or behavior — everything lives in this single file
 2. Update `manifest.json` version if needed
 3. Test your changes by reinstalling in ncSender
 4. Update `latest_release.md` with your changes
@@ -51,9 +48,9 @@ git add -A
 git commit -m "Description of changes"
 git push
 
-# Create a release tag (triggers automated release)
-git tag -a v2.0.1 -m "Release v2.0.1"
-git push origin v2.0.1
+# Create a release tag (triggers automated release — must match manifest.json version)
+git tag -a v3.0.1 -m "Release v3.0.1"
+git push origin v3.0.1
 ```
 
 The GitHub Action will automatically:
@@ -144,7 +141,7 @@ Fusion 360's `assemblyGaugeLength` is for CAM simulation only and does not repre
 
 - **Documentation**: See [README.md](README.md) for full documentation
 - **Issues**: Report bugs on [GitHub Issues](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/issues)
-- **ncSender Docs**: [Plugin Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_DEVELOPMENT.md)
+- **ncSender Source** (no standalone plugin guide in v2 yet — read the source): [siganberg/ncSender](https://github.com/siganberg/ncSender) — see `src/NcSender.Server/Plugins/` for the manifest + JS engine, and `samples/` for examples
 
 ## Contributing
 

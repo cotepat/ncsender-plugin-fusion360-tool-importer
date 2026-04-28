@@ -1,14 +1,20 @@
 {
   "id": "com.ncsender.fusion360-import",
   "name": "Fusion 360 Tool Library Import",
-  "version": "2.3.1",
-  "minAppVersion": "0.3.131",
+  "version": "3.0.0",
+  "minAppVersion": "2.0.0",
+  "configUi": "import.html",
   "author": "ncSender",
   "description": "Import tool libraries from Fusion 360 (JSON exports or clipboard)",
-  "entry": "index.js",
   "icon": "logo.png",
   "category": "utility",
   "repository": "https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer",
+  "platforms": {
+    "pro-v2": "2.0.0"
+  },
   "events": [],
-  "permissions": []
+  "permissions": [],
+  "toolMenu": [
+    { "id": "open-import", "label": "Fusion 360 Tool Importer", "icon": "logo.png", "clientOnly": true }
+  ]
 }

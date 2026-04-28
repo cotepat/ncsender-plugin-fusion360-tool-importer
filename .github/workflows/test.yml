@@ -16,14 +16,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Validate manifest.json
         run: |
           echo "Validating manifest.json..."
           node -e "
             const manifest = require('./manifest.json');
-            const required = ['id', 'name', 'version', 'author', 'description', 'entry', 'category'];
+            const required = ['id', 'name', 'version', 'author', 'description', 'category', 'configUi', 'platforms'];
             const missing = required.filter(field => !manifest[field]);
             if (missing.length > 0) {
               console.error('Missing required fields:', missing);
@@ -33,27 +33,25 @@ jobs:
               console.error('Invalid category. Expected: utility');
               process.exit(1);
             }
+            if (!manifest.platforms['pro-v2']) {
+              console.error('Missing pro-v2 entry in platforms');
+              process.exit(1);
+            }
             console.log('✓ Manifest is valid');
           "
 
-      - name: Validate index.js syntax
+      - name: Verify configUi file exists and has placeholder
         run: |
-          echo "Validating index.js syntax..."
-          node -c index.js
-          echo "✓ Syntax is valid"
-
-      - name: Check required exports
-        run: |
-          echo "Checking for required exports..."
-          if ! grep -q "export function onLoad" index.js; then
-            echo "Error: Missing onLoad export"
+          CONFIG_UI=$(node -p "require('./manifest.json').configUi")
+          if [ ! -f "${CONFIG_UI}" ]; then
+            echo "Error: configUi file '${CONFIG_UI}' not found"
             exit 1
           fi
-          if ! grep -q "export function onUnload" index.js; then
-            echo "Error: Missing onUnload export"
+          if ! grep -q "__INITIAL_CONFIG__" "${CONFIG_UI}"; then
+            echo "Error: ${CONFIG_UI} missing __INITIAL_CONFIG__ placeholder"
             exit 1
           fi
-          echo "✓ Required exports found"
+          echo "✓ configUi file '${CONFIG_UI}' is valid"
 
       - name: Test package creation
         run: |
@@ -66,13 +64,12 @@ jobs:
           PLUGIN_ID=$(node -p "require('./manifest.json').id")
           VERSION=$(node -p "require('./manifest.json').version")
           PACKAGE_NAME="${PLUGIN_ID}-v${VERSION}.zip"
-          
+
           echo "Checking package contents..."
           unzip -l "${PACKAGE_NAME}"
-          
+
           # Verify required files are in the package
           unzip -l "${PACKAGE_NAME}" | grep -q "${PLUGIN_ID}/manifest.json" || exit 1
-          unzip -l "${PACKAGE_NAME}" | grep -q "${PLUGIN_ID}/index.js" || exit 1
-          
-          echo "✓ Package is valid"
+          unzip -l "${PACKAGE_NAME}" | grep -q "${PLUGIN_ID}/import.html" || exit 1
 
+          echo "✓ Package is valid"

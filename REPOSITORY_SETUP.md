@@ -77,10 +77,10 @@ ncsender-plugin-fusion360-tool-importer/
 ├── CONTRIBUTING.md              # Contribution guidelines
 ├── README.md                    # Main documentation
 ├── REPOSITORY_SETUP.md          # This file
-├── index.js                     # Plugin implementation
+├── import.html                  # Plugin UI + logic (everything lives here)
 ├── latest_release.md            # Release notes for next version
-├── logo.png.placeholder         # Logo placeholder (add real logo.png)
-└── manifest.json                # Plugin metadata
+├── logo.png                     # Plugin icon shown in ncSender
+└── manifest.json                # Plugin metadata (declares configUi + toolMenu)
 ```
 
 ## Making Updates
@@ -92,7 +92,7 @@ ncsender-plugin-fusion360-tool-importer/
    git checkout -b feature/my-new-feature
    ```
 
-2. Make your changes to `index.js` or other files
+2. Make your changes to `import.html` or other files
 
 3. Update `manifest.json` version (follow [Semantic Versioning](https://semver.org/)):
    - MAJOR.MINOR.PATCH (e.g., 1.0.0 → 1.0.1 for bug fix)
@@ -169,16 +169,16 @@ Add repository topics for discoverability:
 **Package validation failing?**
 - Run `./.scripts/test-package.sh` locally
 - Check manifest.json syntax
-- Verify index.js has no syntax errors
+- Verify import.html has the `__INITIAL_CONFIG__` placeholder
 
 **Tests failing?**
 - Check GitHub Actions logs
-- Run local validation: `node -c index.js`
 - Validate manifest: `node -p "require('./manifest.json')"`
+- Verify configUi placeholder: `grep __INITIAL_CONFIG__ import.html`
 
 ## Related Documentation
 
 - [ncSender Main Repository](https://github.com/siganberg/ncSender)
-- [Plugin Development Guide](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_DEVELOPMENT.md)
-- [Plugin Architecture](https://github.com/siganberg/ncSender/blob/main/docs/PLUGIN_ARCHITECTURE.md)
+- ncSender v2 plugin source — no standalone docs yet, read [`src/NcSender.Server/Plugins/`](https://github.com/siganberg/ncSender/tree/main/src/NcSender.Server/Plugins) and [`src/NcSender.Core/Models/PluginModels.cs`](https://github.com/siganberg/ncSender/blob/main/src/NcSender.Core/Models/PluginModels.cs)
+- Reference plugin: [ncsender-plugin-rapidchangeatc](https://github.com/siganberg/ncsender-plugin-rapidchangeatc)
 
