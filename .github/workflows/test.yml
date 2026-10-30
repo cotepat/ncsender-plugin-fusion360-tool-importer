@@ -18,6 +18,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Run tests
+        run: node test/run.js
+
       - name: Validate manifest.json
         run: |
           echo "Validating manifest.json..."

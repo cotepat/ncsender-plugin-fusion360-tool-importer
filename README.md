@@ -12,7 +12,7 @@ This plugin allows you to:
 
 1. **Tool Library Import** - Import your complete Fusion 360 tool library (exported to JSON format) with one click
 
-> **Note**: For G-code tool-to-slot mapping when loading programs, see the separate **[ncSender Dynamic Tool Slot Mapper](https://github.com/cotepat/ncsender-plugin-dynamic-tool-slot-mapper)** plugin.
+> **Note**: To choose what `T` means in your G-code (the slot, or the Tool ID that this plugin imports), see **Settings → Tool Changer → Tool Numbering** in ncSender.
 
 ## ✨ Key Features
 
