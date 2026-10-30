@@ -1,7 +1,7 @@
 {
   "id": "com.ncsender.fusion360-import",
   "name": "Fusion 360 Tool Library Import",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "minAppVersion": "2.0.173",
   "configUi": "import.html",
   "author": "ncSender",
