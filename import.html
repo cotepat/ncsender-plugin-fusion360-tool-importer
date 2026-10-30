@@ -396,32 +396,326 @@
 </div>
 
 <script>
+  // -------- Pure, testable functions (shared lexical scope across <script> tags) --------
+
+  const TYPE_MAPPING = {
+    'flat end mill': 'flat',
+    'ball end mill': 'ball',
+    'bull nose end mill': 'ball',
+    'chamfer mill': 'v-bit',
+    'countersink': 'v-bit',
+    'dovetail mill': 'v-bit',
+    'tapered mill': 'v-bit',
+    'drill': 'drill',
+    'counterbore': 'drill',
+    'reamer': 'drill',
+    'spot drill': 'drill',
+    'face mill': 'surfacing',
+    'slot mill': 'flat',
+    'form mill': 'flat',
+    'thread mill': 'thread-mill',
+    'tap': 'thread-mill',
+    'tap left hand': 'thread-mill',
+    'tap right hand': 'thread-mill',
+    'probe': 'probe'
+  };
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function parseTSVLine(line) {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+
+      if (char === '"') {
+        if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === '\t' && !inQuotes) {
+        values.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    values.push(current);
+
+    return values;
+  }
+
+  function convertTSVTool(values, columnMap, settings) {
+    const getValue = (columnName) => {
+      const index = columnMap[columnName];
+      if (index === undefined || index >= values.length) return '';
+      return values[index].trim();
+    };
+
+    const toolIndexStr = getValue('Tool Index (tool_index)');
+    if (!toolIndexStr || toolIndexStr === '') {
+      throw new Error('Missing tool index');
+    }
+
+    const toolIndex = parseInt(toolIndexStr, 10);
+    if (isNaN(toolIndex)) {
+      throw new Error(`Invalid tool index: ${toolIndexStr}`);
+    }
+
+    const toolNumberStr = getValue('Number (tool_number)');
+    let fusionToolNumber = null;
+    let toolNumber = null;
+
+    if (toolNumberStr && toolNumberStr !== '') {
+      const num = parseInt(toolNumberStr, 10);
+      if (!isNaN(num) && num > 0) {
+        fusionToolNumber = num;
+      }
+    }
+
+    if (fusionToolNumber === null) {
+      fusionToolNumber = toolIndex;
+    }
+
+    if (!settings.preserveToolNumber) {
+      const turretStr = getValue('Turret (tool_turret)');
+      if (turretStr && turretStr !== '') {
+        const turretNum = parseInt(turretStr, 10);
+        if (!isNaN(turretNum) && turretNum > 0) {
+          toolNumber = turretNum;
+        }
+      }
+    }
+
+    const diameterStr = getValue('Diameter (tool_diameter)');
+    const diameter = parseFloat(diameterStr);
+    if (isNaN(diameter) || diameter <= 0) {
+      throw new Error(`Invalid diameter: ${diameterStr}`);
+    }
+
+    const unitStr = getValue('Unit (tool_unit)') || '';
+    const unit = unitStr.toLowerCase().trim();
+
+    let diameterInMm = diameter;
+    if (unit.includes('inch')) {
+      diameterInMm = diameter * 25.4;
+    }
+
+    diameterInMm = Math.round(diameterInMm * 100000) / 100000;
+
+    const toolType = getValue('Type (tool_type)') || '';
+    const ncSenderType = TYPE_MAPPING[toolType.toLowerCase()] || 'flat';
+
+    let description = getValue('Description (tool_description)') || '';
+    if (!description || description.trim() === '') {
+      const presetName = getValue('Preset Name (preset_name)') || '';
+      if (presetName) {
+        description = presetName;
+      } else {
+        const paddedNumber = String(fusionToolNumber).padStart(3, '0');
+        description = `Tool ${paddedNumber}`;
+      }
+    }
+
+    description = description.trim();
+
+    if (settings.includeFusionToolNumber) {
+      const paddedNumber = String(fusionToolNumber).padStart(3, '0');
+      if (!description.startsWith(`${paddedNumber} -`) && !description.startsWith(`${fusionToolNumber} -`)) {
+        description = `${paddedNumber} - ${description}`;
+      }
+    }
+
+    const comment = getValue('Comment (tool_comment)') || '';
+    const productId = getValue('Product ID (tool_productId)') || '';
+
+    return {
+      toolId: fusionToolNumber,
+      toolNumber: toolNumber,
+      name: description,
+      type: ncSenderType,
+      diameter: diameterInMm,
+      offsets: { tlo: 0, x: 0, y: 0, z: 0 },
+      metadata: {
+        notes: comment,
+        image: '',
+        sku: productId
+      }
+    };
+  }
+
+  function parseTSVData(tsvText, settings) {
+    const lines = tsvText.split('\n').filter(line => line.trim() !== '');
+    if (lines.length < 2) {
+      return [];
+    }
+
+    const headerLine = lines[0];
+    const headers = parseTSVLine(headerLine);
+
+    const columnMap = {};
+    headers.forEach((header, index) => {
+      const cleanHeader = header.replace(/^"|"$/g, '').trim();
+      columnMap[cleanHeader] = index;
+    });
+
+    const tools = [];
+    const seenToolIds = new Set();
+    const errors = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      try {
+        const values = parseTSVLine(lines[i]);
+        const tool = convertTSVTool(values, columnMap, settings);
+        if (tool) {
+          if (!seenToolIds.has(tool.toolId)) {
+            seenToolIds.add(tool.toolId);
+            tools.push(tool);
+          }
+        }
+      } catch (error) {
+        errors.push(`Row ${i + 1}: ${error.message}`);
+      }
+    }
+
+    if (errors.length > 0 && tools.length === 0) {
+      throw new Error('Failed to parse any tools:\n' + errors.slice(0, 5).join('\n'));
+    }
+
+    return tools;
+  }
+
+  function convertFusionTool(fusionTool, settings) {
+    const fusionToolNumber = fusionTool['post-process']?.number;
+    if (fusionToolNumber === undefined || fusionToolNumber === null) {
+      throw new Error('Tool missing Fusion 360 tool number');
+    }
+
+    const fusionType = fusionTool.type?.toLowerCase() || '';
+    const ncSenderType = TYPE_MAPPING[fusionType] || 'flat';
+
+    let toolNumber = null;
+    if (!settings.preserveToolNumber) {
+      const turret = fusionTool['post-process']?.turret;
+      toolNumber = (turret !== undefined && turret !== null && turret > 0) ? turret : null;
+    }
+
+    const diameter = fusionTool.geometry?.DC || 0;
+    if (diameter <= 0) {
+      throw new Error(`Invalid diameter: ${diameter}`);
+    }
+
+    const toolUnitFromExpressions = fusionTool.expressions?.tool_unit || '';
+    const toolUnitFromRoot = fusionTool.unit || '';
+    const toolUnit = toolUnitFromExpressions || toolUnitFromRoot;
+
+    let diameterInMm = diameter;
+    const unitStr = toolUnit.replace(/['"]/g, '').toLowerCase().trim();
+    if (unitStr.includes('inch')) {
+      diameterInMm = diameter * 25.4;
+    }
+
+    diameterInMm = Math.round(diameterInMm * 100000) / 100000;
+
+    let description = fusionTool.description || '';
+    if (!description || description.trim() === '') {
+      const presetName = fusionTool['preset-name'] || '';
+      if (presetName) {
+        description = presetName;
+      } else {
+        const paddedNumber = String(fusionToolNumber).padStart(3, '0');
+        description = `Tool ${paddedNumber}`;
+      }
+    }
+
+    description = description.trim();
+
+    if (settings.includeFusionToolNumber) {
+      const paddedNumber = String(fusionToolNumber).padStart(3, '0');
+      if (!description.startsWith(`${paddedNumber} -`) && !description.startsWith(`${fusionToolNumber} -`)) {
+        description = `${paddedNumber} - ${description}`;
+      }
+    }
+
+    return {
+      toolId: fusionToolNumber,
+      toolNumber: toolNumber,
+      name: description,
+      type: ncSenderType,
+      diameter: diameterInMm,
+      offsets: { tlo: 0, x: 0, y: 0, z: 0 },
+      metadata: {
+        notes: fusionTool['post-process']?.comment || '',
+        image: '',
+        sku: fusionTool['product-id'] || ''
+      }
+    };
+  }
+
+  // Treat null/undefined/'' as equivalent so existing tools without a metadata field
+  // don't get falsely flagged as "modified" against a freshly converted tool.
+  function nz(v) { return v == null ? '' : v; }
+
+  function computeComparison(existingTools, newTools, settings) {
+    const result = newTools.map(newTool => {
+      const existing = existingTools.find(t => t.toolId === newTool.toolId);
+      let status = 'new';
+      const changes = [];
+
+      if (existing) {
+        if (nz(existing.name) !== nz(newTool.name)) changes.push('Description');
+        if (nz(existing.type) !== nz(newTool.type)) changes.push('Type');
+        if (Math.abs((existing.diameter || 0) - (newTool.diameter || 0)) > 0.001) changes.push('Diameter');
+        if (!settings.preserveToolNumber && nz(existing.toolNumber) !== nz(newTool.toolNumber)) changes.push('Slot');
+        if (nz(existing.metadata?.notes) !== nz(newTool.metadata?.notes)) changes.push('Notes');
+        if (nz(existing.metadata?.sku) !== nz(newTool.metadata?.sku)) changes.push('SKU');
+
+        status = changes.length > 0 ? 'modified' : 'unchanged';
+      }
+
+      return { status, tool: newTool, existing: existing || null, changes };
+    });
+
+    result.sort((a, b) => a.tool.toolId - b.tool.toolId);
+    return result;
+  }
+
+  // Mutates newTools so the displayed slot matches what import will actually use.
+  // Without this, preserve-mode shows "No Slot" on first render even when the library
+  // tool already has a slot assigned.
+  function applyPreservedSlots(newTools, existingTools, settings) {
+    if (!settings.preserveToolNumber) return newTools;
+    return newTools.map(t => {
+      const existing = existingTools.find(e => e.toolId === t.toolId);
+      if (existing && existing.toolNumber != null) {
+        return { ...t, toolNumber: existing.toolNumber };
+      }
+      return t;
+    });
+  }
+
+  // Expose for test runner. Does not pollute global in any meaningful way.
+  if (typeof window !== 'undefined') {
+    window.__fusionImportInternals = {
+      TYPE_MAPPING, escapeHtml, parseTSVLine, parseTSVData,
+      convertTSVTool, convertFusionTool, computeComparison, applyPreservedSlots
+    };
+  }
+</script>
+
+<script>
   (function() {
     const initialConfig = __INITIAL_CONFIG__;
 
     let errorTimeout = null;
-
-    const TYPE_MAPPING = {
-      'flat end mill': 'flat',
-      'ball end mill': 'ball',
-      'bull nose end mill': 'ball',
-      'chamfer mill': 'v-bit',
-      'countersink': 'v-bit',
-      'dovetail mill': 'v-bit',
-      'tapered mill': 'v-bit',
-      'drill': 'drill',
-      'counterbore': 'drill',
-      'reamer': 'drill',
-      'spot drill': 'drill',
-      'face mill': 'surfacing',
-      'slot mill': 'flat',
-      'form mill': 'flat',
-      'thread mill': 'thread-mill',
-      'tap': 'thread-mill',
-      'tap left hand': 'thread-mill',
-      'tap right hand': 'thread-mill',
-      'probe': 'probe'
-    };
 
     let existingTools = [];
     let newTools = [];
@@ -482,6 +776,7 @@
 
         newTools = tools;
         await loadExistingTools();
+        newTools = applyPreservedSlots(newTools, existingTools, settings);
         rebuildComparison();
 
         document.getElementById('fileSelector').classList.add('fusion-hidden');
@@ -507,6 +802,9 @@
     document.getElementById('fileInput').onchange = async function(event) {
       const file = event.target.files[0];
       if (!file) return;
+
+      // Reset value so picking the same file again still fires onchange.
+      event.target.value = '';
 
       document.getElementById('errorDisplay').classList.add('fusion-hidden');
       document.getElementById('successDisplay').classList.add('fusion-hidden');
@@ -544,6 +842,7 @@
         }
 
         await loadExistingTools();
+        newTools = applyPreservedSlots(newTools, existingTools, settings);
         rebuildComparison();
 
         document.getElementById('fileSelector').classList.add('fusion-hidden');
@@ -562,293 +861,8 @@
       }
     };
 
-    function parseTSVData(tsvText, settings) {
-      const lines = tsvText.split('\n').filter(line => line.trim() !== '');
-      if (lines.length < 2) {
-        return [];
-      }
-
-      // Parse header row
-      const headerLine = lines[0];
-      const headers = parseTSVLine(headerLine);
-
-      // Find column indices
-      const columnMap = {};
-      headers.forEach((header, index) => {
-        // Remove quotes and extract field name
-        const cleanHeader = header.replace(/^"|"$/g, '').trim();
-        columnMap[cleanHeader] = index;
-      });
-
-      // Parse data rows and deduplicate by toolId (keep first occurrence)
-      const tools = [];
-      const seenToolIds = new Set();
-      const errors = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        try {
-          const values = parseTSVLine(lines[i]);
-          const tool = convertTSVTool(values, columnMap, settings);
-          if (tool) {
-            // Only add tool if we haven't seen this toolId before
-            // This handles multiple rows for the same tool (different presets)
-            if (!seenToolIds.has(tool.toolId)) {
-              seenToolIds.add(tool.toolId);
-              tools.push(tool);
-            }
-          }
-        } catch (error) {
-          errors.push(`Row ${i + 1}: ${error.message}`);
-        }
-      }
-
-      if (errors.length > 0 && tools.length === 0) {
-        throw new Error('Failed to parse any tools:\n' + errors.slice(0, 5).join('\n'));
-      }
-
-      return tools;
-    }
-
-    function parseTSVLine(line) {
-      const values = [];
-      let current = '';
-      let inQuotes = false;
-
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-
-        if (char === '"') {
-          // Check if this is an escaped quote (two quotes in a row)
-          if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
-            // This is an escaped quote - add one quote to output and skip the next one
-            current += '"';
-            i++; // Skip the next quote
-          } else {
-            // This is a field delimiter quote - toggle inQuotes state
-            inQuotes = !inQuotes;
-          }
-        } else if (char === '\t' && !inQuotes) {
-          values.push(current);
-          current = '';
-        } else {
-          current += char;
-        }
-      }
-      values.push(current); // Add last value
-
-      return values;
-    }
-
-    function convertTSVTool(values, columnMap, settings) {
-      // Helper to get value by column name
-      const getValue = (columnName) => {
-        const index = columnMap[columnName];
-        if (index === undefined || index >= values.length) return '';
-        const value = values[index];
-        // Parser already handles escaped quotes, just trim
-        return value.trim();
-      };
-
-      // Get required fields
-      const toolIndexStr = getValue('Tool Index (tool_index)');
-      if (!toolIndexStr || toolIndexStr === '') {
-        throw new Error('Missing tool index');
-      }
-
-      const toolIndex = parseInt(toolIndexStr, 10);
-      if (isNaN(toolIndex)) {
-        throw new Error(`Invalid tool index: ${toolIndexStr}`);
-      }
-
-      // Get tool number (this is the Fusion 360 tool number that appears in G-code, e.g., T21)
-      const toolNumberStr = getValue('Number (tool_number)');
-      let fusionToolNumber = null;
-      let toolNumber = null; // ATC pocket number (from turret field, if available)
-
-      if (toolNumberStr && toolNumberStr !== '') {
-        const num = parseInt(toolNumberStr, 10);
-        if (!isNaN(num) && num > 0) {
-          fusionToolNumber = num; // This becomes toolId
-        }
-      }
-
-      // If no tool number, fall back to tool index
-      if (fusionToolNumber === null) {
-        fusionToolNumber = toolIndex;
-      }
-
-      // Get turret number (ATC slot) from TSV if available - but only if not preserving
-      if (!settings.preserveToolNumber) {
-        const turretStr = getValue('Turret (tool_turret)');
-        if (turretStr && turretStr !== '') {
-          const turretNum = parseInt(turretStr, 10);
-          if (!isNaN(turretNum) && turretNum > 0) {
-            toolNumber = turretNum;
-          }
-        }
-      }
-
-      // Get diameter and unit
-      const diameterStr = getValue('Diameter (tool_diameter)');
-      const diameter = parseFloat(diameterStr);
-      if (isNaN(diameter) || diameter <= 0) {
-        throw new Error(`Invalid diameter: ${diameterStr}`);
-      }
-
-      // Get unit and convert to mm if needed
-      const unitStr = getValue('Unit (tool_unit)') || '';
-      const unit = unitStr.toLowerCase().trim();
-
-      let diameterInMm = diameter;
-      if (unit.includes('inch')) {
-        // Convert inches to millimeters
-        diameterInMm = diameter * 25.4;
-      }
-
-      // Round to 0.00001 mm precision to avoid floating point errors
-      diameterInMm = Math.round(diameterInMm * 100000) / 100000;
-
-      // Get type
-      const toolType = getValue('Type (tool_type)') || '';
-      const ncSenderType = TYPE_MAPPING[toolType.toLowerCase()] || 'flat';
-
-      // Get description
-      let description = getValue('Description (tool_description)') || '';
-      if (!description || description.trim() === '') {
-        const presetName = getValue('Preset Name (preset_name)') || '';
-        if (presetName) {
-          description = presetName;
-        } else {
-          const paddedNumber = String(fusionToolNumber).padStart(3, '0');
-          description = `Tool ${paddedNumber}`;
-        }
-      }
-
-      // Add Fusion tool number to description if enabled
-      if (settings.includeFusionToolNumber) {
-        const paddedNumber = String(fusionToolNumber).padStart(3, '0');
-        if (!description.startsWith(`${paddedNumber} -`) && !description.startsWith(`${fusionToolNumber} -`)) {
-          description = `${paddedNumber} - ${description}`;
-        }
-      }
-
-      // Get comment/notes
-      const comment = getValue('Comment (tool_comment)') || '';
-
-      // Get product ID/SKU
-      const productId = getValue('Product ID (tool_productId)') || '';
-
-      return {
-        toolId: fusionToolNumber,
-        toolNumber: toolNumber,
-        name: description.trim(),
-        type: ncSenderType,
-        diameter: diameterInMm,
-        offsets: { tlo: 0, x: 0, y: 0, z: 0 },
-        metadata: {
-          notes: comment,
-          image: '',
-          sku: productId
-        }
-      };
-    }
-
-    function convertFusionTool(fusionTool, settings) {
-      const fusionToolNumber = fusionTool['post-process']?.number;
-      if (fusionToolNumber === undefined || fusionToolNumber === null) {
-        throw new Error('Tool missing Fusion 360 tool number');
-      }
-
-      const fusionType = fusionTool.type?.toLowerCase() || '';
-      const ncSenderType = TYPE_MAPPING[fusionType] || 'flat';
-
-      // Only get turret if not preserving existing slot assignments
-      let toolNumber = null;
-      if (!settings.preserveToolNumber) {
-        const turret = fusionTool['post-process']?.turret;
-        toolNumber = (turret !== undefined && turret !== null && turret > 0) ? turret : null;
-      }
-
-      const diameter = fusionTool.geometry?.DC || 0;
-      if (diameter <= 0) {
-        throw new Error(`Invalid diameter: ${diameter}`);
-      }
-
-      // Get unit and convert to mm if needed
-      // Check two possible locations:
-      // 1. expressions.tool_unit (can be "'millimeters'" or "'inches'" with quotes)
-      // 2. unit field at top level (can be "millimeters" or "inches")
-      const toolUnitFromExpressions = fusionTool.expressions?.tool_unit || '';
-      const toolUnitFromRoot = fusionTool.unit || '';
-      const toolUnit = toolUnitFromExpressions || toolUnitFromRoot;
-
-      let diameterInMm = diameter;
-      // Remove quotes and single quotes, then check if it's inches
-      const unitStr = toolUnit.replace(/['"]/g, '').toLowerCase().trim();
-      if (unitStr.includes('inch')) {
-        // Convert inches to millimeters
-        diameterInMm = diameter * 25.4;
-      }
-
-      // Round to 0.00001 mm precision to avoid floating point errors
-      diameterInMm = Math.round(diameterInMm * 100000) / 100000;
-
-      let description = fusionTool.description || '';
-      if (!description || description.trim() === '') {
-        // Try preset name as fallback (matches TSV import behavior)
-        const presetName = fusionTool['preset-name'] || '';
-        if (presetName) {
-          description = presetName;
-        } else {
-          const paddedNumber = String(fusionToolNumber).padStart(3, '0');
-          description = `Tool ${paddedNumber}`;
-        }
-      }
-
-      if (settings.includeFusionToolNumber) {
-        const paddedNumber = String(fusionToolNumber).padStart(3, '0');
-        if (!description.startsWith(`${paddedNumber} -`) && !description.startsWith(`${fusionToolNumber} -`)) {
-          description = `${paddedNumber} - ${description}`;
-        }
-      }
-
-      return {
-        toolId: fusionToolNumber,
-        toolNumber: toolNumber,
-        name: description.trim(),
-        type: ncSenderType,
-        diameter: diameterInMm,
-        offsets: { tlo: 0, x: 0, y: 0, z: 0 },
-        metadata: {
-          notes: fusionTool['post-process']?.comment || '',
-          image: '',
-          sku: fusionTool['product-id'] || ''
-        }
-      };
-    }
-
     function rebuildComparison() {
-      comparison = newTools.map(newTool => {
-        const existing = existingTools.find(t => t.toolId === newTool.toolId);
-        let status = 'new';
-        const changes = [];
-
-        if (existing) {
-          if (existing.name !== newTool.name) changes.push('Description');
-          if (existing.type !== newTool.type) changes.push('Type');
-          if (Math.abs(existing.diameter - newTool.diameter) > 0.001) changes.push('Diameter');
-          // Only flag slot changes if we're actually updating slots (not preserving)
-          if (!settings.preserveToolNumber && existing.toolNumber !== newTool.toolNumber) changes.push('Slot');
-          if (existing.metadata?.notes !== newTool.metadata.notes) changes.push('Notes');
-          if (existing.metadata?.sku !== newTool.metadata.sku) changes.push('SKU');
-
-          status = changes.length > 0 ? 'modified' : 'unchanged';
-        }
-
-        return { status, tool: newTool, existing: existing || null, changes };
-      });
-
-      comparison.sort((a, b) => a.tool.toolId - b.tool.toolId);
+      comparison = computeComparison(existingTools, newTools, settings);
       updateUI();
     }
 
@@ -867,14 +881,13 @@
       tbody.innerHTML = comparison.map(item => {
         const statusClass = `fusion-status-${item.status}`;
 
-        // Build Tool ID cell with slot badge (matching ncSender display)
-        const slotBadge = item.tool.toolNumber !== null
-          ? `<span class="fusion-tool-number-badge">Slot${item.tool.toolNumber}</span>`
+        const slotBadge = item.tool.toolNumber != null
+          ? `<span class="fusion-tool-number-badge">Slot${escapeHtml(item.tool.toolNumber)}</span>`
           : `<span class="fusion-tool-slot-placeholder">No Slot</span>`;
 
         const toolIdCell = `
           <div class="fusion-tool-id-cell">
-            <span class="fusion-tool-id-text">${item.tool.toolId}</span>
+            <span class="fusion-tool-id-text">${escapeHtml(item.tool.toolId)}</span>
             ${slotBadge}
           </div>
         `;
@@ -887,8 +900,8 @@
           <tr>
             <td><span class="fusion-status-badge ${statusClass}">${item.status}</span></td>
             <td>${toolIdCell}</td>
-            <td>${item.tool.name}</td>
-            <td>${item.tool.type}</td>
+            <td>${escapeHtml(item.tool.name)}</td>
+            <td>${escapeHtml(item.tool.type)}</td>
             <td>${item.tool.diameter.toFixed(3)} mm</td>
             <td>${changesDisplay}</td>
           </tr>
@@ -896,40 +909,27 @@
       }).join('');
     }
 
+    function rebuildFromOriginal() {
+      if (dataSource === 'file' && originalData) {
+        const built = [];
+        for (const fusionTool of originalData.data || []) {
+          try {
+            built.push(convertFusionTool(fusionTool, settings));
+          } catch (error) {}
+        }
+        newTools = built;
+      } else if (dataSource === 'clipboard' && originalData) {
+        newTools = parseTSVData(originalData, settings);
+      }
+      newTools = applyPreservedSlots(newTools, existingTools, settings);
+    }
+
     document.getElementById('includeFusionToolNumber').onchange = async function(event) {
       settings.includeFusionToolNumber = event.target.checked;
       await saveSettings();
 
       try {
-        if (dataSource === 'file' && originalData) {
-          // Rebuild from JSON file data
-          newTools = [];
-          for (const fusionTool of originalData.data || []) {
-            try {
-              const ncTool = convertFusionTool(fusionTool, settings);
-              newTools.push(ncTool);
-            } catch (error) {}
-          }
-        } else if (dataSource === 'clipboard' && originalData) {
-          // Rebuild from TSV clipboard data
-          newTools = parseTSVData(originalData, settings);
-        } else {
-          // Fallback: try to read from file input
-          const fileInput = document.getElementById('fileInput');
-          if (fileInput.files[0]) {
-            const content = await fileInput.files[0].text();
-            const fusionData = JSON.parse(content);
-            originalData = fusionData;
-            dataSource = 'file';
-            newTools = [];
-            for (const fusionTool of fusionData.data || []) {
-              try {
-                const ncTool = convertFusionTool(fusionTool, settings);
-                newTools.push(ncTool);
-              } catch (error) {}
-            }
-          }
-        }
+        rebuildFromOriginal();
       } catch (error) {
         showError('Failed to rebuild tools: ' + error.message);
       }
@@ -941,39 +941,8 @@
       settings.preserveToolNumber = event.target.checked;
       await saveSettings();
 
-      // Rebuild tools from original data with new setting
       try {
-        if (dataSource === 'file' && originalData) {
-          newTools = [];
-          for (const fusionTool of originalData.data || []) {
-            try {
-              const ncTool = convertFusionTool(fusionTool, settings);
-
-              // If preserving and tool exists in library, use its current slot
-              if (settings.preserveToolNumber) {
-                const existing = existingTools.find(t => t.toolId === ncTool.toolId);
-                if (existing) {
-                  ncTool.toolNumber = existing.toolNumber;
-                }
-              }
-
-              newTools.push(ncTool);
-            } catch (error) {}
-          }
-        } else if (dataSource === 'clipboard' && originalData) {
-          newTools = parseTSVData(originalData, settings);
-
-          // If preserving, update slots for existing tools
-          if (settings.preserveToolNumber) {
-            newTools = newTools.map(ncTool => {
-              const existing = existingTools.find(t => t.toolId === ncTool.toolId);
-              if (existing) {
-                return { ...ncTool, toolNumber: existing.toolNumber };
-              }
-              return ncTool;
-            });
-          }
-        }
+        rebuildFromOriginal();
       } catch (error) {
         showError('Failed to rebuild tools: ' + error.message);
       }
