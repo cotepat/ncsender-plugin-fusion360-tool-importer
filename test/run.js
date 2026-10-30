@@ -408,9 +408,16 @@ test('readMachine treats missing settings as Slot numbering with no known magazi
   assert.strictEqual(machine.probeSlot, null);
 });
 
-test('numberingNotice speaks up only in Slot numbering', () => {
-  assert.ok(lib.numberingNotice({ numbering: 'slot' }).includes('M6 T5 loads slot 5'));
-  assert.strictEqual(lib.numberingNotice({ numbering: 'toolId' }), '');
+test('numberingNotice always says which numbering it found', () => {
+  const notice = (tool) => lib.numberingNotice(lib.readMachine({ tool }));
+  assert.ok(notice({ numbering: 'slot' }).includes('M6 T5 loads slot 5'));
+  assert.ok(notice({ numbering: 'toolId' }).includes('Tool ID numbering'));
+});
+
+test('numberingNotice does not pass off unreadable settings as Slot numbering', () => {
+  const notice = lib.numberingNotice(lib.readMachine(null));
+  assert.ok(notice.includes('Could not read'));
+  assert.ok(!notice.includes('M6 T5 loads slot 5'));
 });
 
 // ---------- Dialog scripts share the page's global scope ----------

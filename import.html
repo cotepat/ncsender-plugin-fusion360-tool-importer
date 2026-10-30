@@ -800,9 +800,12 @@
     }
 
     function numberingNotice(machine) {
+      if (!machine.known) {
+        return 'Could not read ncSender\'s settings, so its tool numbering is unknown. Turret numbers can\'t take over occupied slots.';
+      }
       return machine.numbering === 'slot'
         ? 'ncSender is using Slot numbering: M6 T5 loads slot 5. Tool IDs don\'t select tools, only the slot a tool is assigned to does.'
-        : '';
+        : 'ncSender is using Tool ID numbering: M6 T5 loads Tool ID 5 from whichever slot it is in. Turret numbers can only take over occupied slots in Slot numbering (Settings > Tool Changer).';
     }
 
     // Fusion owns what it exports. Everything ncSender measures or stores on the
@@ -923,15 +926,18 @@
         const response = await fetch('/api/settings');
         if (response.ok) {
           machine = readMachine(await response.json());
-          const notice = numberingNotice(machine);
-          const noticeEl = document.getElementById('numberingNotice');
-          noticeEl.textContent = notice;
-          noticeEl.classList.toggle('fusion-hidden', !notice);
-          updateTakeOverOption();
+        } else {
+          console.error('Failed to load settings: HTTP ' + response.status);
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
       }
+
+      // Always say what was found: a failed read must not look like Slot numbering.
+      const noticeEl = document.getElementById('numberingNotice');
+      noticeEl.textContent = numberingNotice(machine);
+      noticeEl.classList.remove('fusion-hidden');
+      updateTakeOverOption();
     }
 
     function updateTakeOverOption() {
