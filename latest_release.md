@@ -1,44 +1,36 @@
-# Fusion 360 Tool Library Import v3.0.0
+# Fusion 360 Tool Library Import v3.0.4
 
-## ⚠️ Breaking Change: ncSender v2 Required
+## ⚠️ Before You Update
 
-This release **requires ncSender 2.0.0 or higher**. The plugin has been rewritten to use ncSender v2's new plugin model (`pro-v2` platform). It will **not** load on ncSender v1 (0.3.x) — if you are still on v1, stay on plugin v2.3.1.
+- **ncSender 2.0.173 or newer is now required.** ncSender refuses the update on older versions, so update ncSender first.
+- **"Do not overwrite ncSender Slot number" now has a clear meaning.** Checked (the default), an import never changes a slot. Unchecked, Fusion 360 turret numbers replace slots, so a tool can take a slot from another tool. Check this setting before your next import.
 
 ## What's New
 
-### 🔌 Rewritten for ncSender v2 Plugin Model
-- Migrated from the v1 Node.js plugin runtime to v2's declarative `configUi` model
-- Plugin now ships as a single `import.html` file rather than `index.js` + `tool-importer.js`
-- Tool menu entry is registered declaratively in `manifest.json` (no `onLoad` wiring)
-- Settings persist via the standard `/api/plugins/{id}/settings` endpoint
-- All existing functionality (JSON import, clipboard import, comparison table, smart merge, library reset) is preserved unchanged
+### 🔧 Turret numbers can replace slots
+With "Do not overwrite" unchecked:
+- A tool whose turret number points to an occupied slot takes it. The tool that was there ends up with no slot but keeps everything else.
+- A tool with no turret number (blank or 0) keeps its slot. To free a slot, use the Tool Library.
+- Tools can swap or move slots in one import.
+- The import stops if a turret number is past your magazine, or if Fusion 360 gives two tools the same turret number. The table shows why.
+- The preview lists every tool that will lose its slot, including tools that aren't in your Fusion 360 file.
 
-### 📦 What Did Not Change
-- Same Fusion 360 JSON / TSV parsing
-- Same imperial → metric conversion
-- Same NEW / MODIFIED / UNCHANGED comparison flow
-- Same import options ("Include Fusion 360 tool number", "Do not overwrite ncSender Slot number")
-- Same tool ID / slot mapping behavior
+### 🐛 Fixes
+- **Stored tool data is kept.** Re-importing a tool used to reset its tool length and TLS offsets and drop its image, life, dimensions and specs. Now only what Fusion 360 exports is updated: name, type, diameter, notes and SKU.
+- **Your library can't be lost to a failed read.** The importer reads the library again right before saving and stops if it can't, rather than saving over it.
+- **Duplicate Fusion 360 tool numbers are shown.** They used to be dropped silently. The first tool is kept and the others are listed as `duplicate`. JSON imports used to keep the last one, so that behavior changes.
+- **No more false MODIFIED.** Tools with no notes or SKU in ncSender no longer show as modified when nothing changed.
+- Tool names can no longer inject HTML into the dialog, and the tool number prefix is no longer added twice.
+- The dialog no longer clashes with other plugins' dialogs or errors when reopened.
+
+### ℹ️ Tool numbering note
+The dialog now shows which Tool Numbering mode ncSender is using (Slot or Tool ID), since that decides what `M6 T5` loads.
 
 ## ⚙️ Requirements
 
-- **ncSender**: 2.0.0 or higher (`pro-v2` runtime)
+- **ncSender**: 2.0.173 or higher
 - **Fusion 360**: Any recent version
-
-## 📍 How to Use
-
-**Clipboard Import:**
-1. In Fusion 360: Select tools → Copy
-2. In ncSender: Plugins → Fusion 360 Tool Importer
-3. Click "Paste from Clipboard"
-4. Review → Import
-
-**JSON File Import:**
-1. In Fusion 360: Export tools as JSON
-2. In ncSender: Plugins → Fusion 360 Tool Importer
-3. Click "Select Fusion 360 JSON File"
-4. Review → Import
 
 ---
 
-**Full Changelog**: https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/compare/v2.3.1...v3.0.0
+**Full Changelog**: https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/compare/v3.0.0...v3.0.4

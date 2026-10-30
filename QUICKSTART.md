@@ -84,7 +84,7 @@ The GitHub Action will automatically:
 6. Choose your exported JSON file
 7. Configure import options:
    - ☑️ **Include Fusion 360 tool number in description**: Adds padded numbers like "001 - End Mill"
-   - ☑️ **Do not overwrite ncSender Slot number**: Preserves existing ATC slot assignments
+   - ☑️ **Do not overwrite ncSender Slot number**: Checked, the import never changes a slot. Unchecked, Fusion 360 turret numbers replace slots, and a tool already in that slot loses it
 8. Review the preview:
    - **Summary stats**: Shows total, new, and modified tools
    - **Comparison table**: Lists all tools with their status and changes
