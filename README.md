@@ -62,8 +62,7 @@ The plugin will appear in **Plugins → Fusion 360 Tool Importer** menu.
 
 ### Tool Import Options
 - **Include Fusion 360 tool number in description** - Adds `[XXX]` prefix for reference
-- **Do not overwrite ncSender Tool Number** - Preserves existing ATC assignments
-- **Let Fusion 360 turret numbers take over occupied slots** - Slot numbering only, with the option above off. A tool whose turret number lands on an occupied slot takes it, and the tool that was there loses its slot but keeps everything else. The import still stops if a turret number is past the magazine, or if Fusion gives two tools the same turret number
+- **Do not overwrite ncSender Slot number** - On: the import never changes a slot, and new tools come in with no slot. Off: Fusion 360 turret numbers replace slots, in either tool numbering mode. A tool already in that slot loses it but keeps everything else, and a tool with no turret number keeps its slot. The import stops if a turret number is past the magazine, or if Fusion gives two tools the same turret number
 
 ## 📊 Technical Details
 
