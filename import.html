@@ -702,11 +702,43 @@
     });
   }
 
+  // Fusion owns what it exports. Everything ncSender measures or stores on the
+  // tool (offsets, image, life, dimensions, specs) stays as it is.
+  function mergeTool(existing, incoming) {
+    return {
+      ...existing,
+      toolNumber: incoming.toolNumber,
+      name: incoming.name,
+      type: incoming.type,
+      diameter: incoming.diameter,
+      metadata: {
+        ...existing.metadata,
+        notes: incoming.metadata.notes,
+        sku: incoming.metadata.sku
+      }
+    };
+  }
+
+  // The whole library as it will be saved: PUT /api/tools replaces everything.
+  function buildLibrary(existingTools, toolsToImport) {
+    const library = [...existingTools];
+    toolsToImport.forEach(tool => {
+      const index = library.findIndex(t => t.toolId === tool.toolId);
+      if (index >= 0) {
+        library[index] = mergeTool(library[index], tool);
+      } else {
+        library.push(tool);
+      }
+    });
+    return library;
+  }
+
   // Expose for test runner. Does not pollute global in any meaningful way.
   if (typeof window !== 'undefined') {
     window.__fusionImportInternals = {
       TYPE_MAPPING, escapeHtml, parseTSVLine, parseTSVData,
-      convertTSVTool, convertFusionTool, computeComparison, applyPreservedSlots
+      convertTSVTool, convertFusionTool, computeComparison, applyPreservedSlots,
+      mergeTool, buildLibrary
     };
   }
 </script>
@@ -1066,18 +1098,7 @@
     async function importAll() {
       const toolsToImport = comparison
         .filter(c => c.status === 'new' || c.status === 'modified')
-        .map(c => {
-          const tool = { ...c.tool };
-
-          // If preserveToolNumber is checked and tool exists, use existing slot
-          if (settings.preserveToolNumber && c.existing) {
-            tool.toolNumber = c.existing.toolNumber;
-          }
-          // Otherwise: tool.toolNumber is already correct from conversion
-          // (null if preserving, or Fusion turret if not)
-
-          return tool;
-        });
+        .map(c => c.tool);
 
       if (toolsToImport.length === 0) {
         showError('No tools to import');
@@ -1089,28 +1110,20 @@
 
     async function performImport(toolsToImport) {
       try {
-        const mergedTools = [...existingTools];
+        // Saving replaces the whole library, so merge onto what is there now. If
+        // it can't be read, stop: saving from a stale or empty list would lose tools.
+        const current = await fetch('/api/tools');
+        if (!current.ok) {
+          throw new Error('Could not read the current library');
+        }
+        existingTools = await current.json();
 
-        toolsToImport.forEach(importTool => {
-          const existingIndex = mergedTools.findIndex(t => t.toolId === importTool.toolId);
-          if (existingIndex >= 0) {
-            // Update existing tool: preserve id and merge other properties
-            const existingTool = mergedTools[existingIndex];
-            mergedTools[existingIndex] = {
-              ...importTool,
-              id: existingTool.id  // Preserve the existing internal id
-            };
-          } else {
-            // New tool - remove id if present, let ncSender migration generate it
-            const { id, ...newTool } = importTool;
-            mergedTools.push(newTool);
-          }
-        });
+        const library = buildLibrary(existingTools, applyPreservedSlots(toolsToImport, existingTools, settings));
 
         const response = await fetch('/api/tools', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(mergedTools)
+          body: JSON.stringify(library)
         });
 
         if (!response.ok) {

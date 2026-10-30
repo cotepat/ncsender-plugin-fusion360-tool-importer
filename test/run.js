@@ -165,6 +165,61 @@ test('convertTSVTool does not double-prefix when description has leading whitesp
     `expected single prefix, got "${tool.name}"`);
 });
 
+// ---------- Re-importing must not lose what ncSender stores on the tool ----------
+const storedTool = () => ({
+  id: 26,
+  toolId: 26,
+  toolNumber: 6,
+  name: 'Old name',
+  type: 'flat',
+  diameter: 25.4,
+  offsets: { tlo: -41.25, x: 12, y: -3, z: 1.5 },
+  metadata: { notes: 'old note', image: 'facemill.png', sku: 'old-sku' },
+  dimensions: { flute_length: 10 },
+  specs: { flutes: 4 },
+  life: { hours: 12 }
+});
+const importedTool = () => ({
+  toolId: 26,
+  toolNumber: 6,
+  name: 'New name',
+  type: 'surfacing',
+  diameter: 25,
+  offsets: { tlo: 0, x: 0, y: 0, z: 0 },
+  metadata: { notes: 'new note', image: '', sku: 'new-sku' }
+});
+
+test('mergeTool takes Fusion fields and keeps everything ncSender stores', () => {
+  const merged = lib.mergeTool(storedTool(), importedTool());
+  assert.strictEqual(merged.id, 26);
+  assert.strictEqual(merged.name, 'New name');
+  assert.strictEqual(merged.type, 'surfacing');
+  assert.strictEqual(merged.diameter, 25);
+  assert.strictEqual(merged.metadata.notes, 'new note');
+  assert.strictEqual(merged.metadata.sku, 'new-sku');
+  assert.strictEqual(merged.metadata.image, 'facemill.png');
+  assert.deepStrictEqual({ ...merged.offsets }, { tlo: -41.25, x: 12, y: -3, z: 1.5 });
+  assert.deepStrictEqual({ ...merged.dimensions }, { flute_length: 10 });
+  assert.deepStrictEqual({ ...merged.specs }, { flutes: 4 });
+  assert.deepStrictEqual({ ...merged.life }, { hours: 12 });
+});
+
+test('mergeTool handles a stored tool with no metadata', () => {
+  const stored = storedTool();
+  delete stored.metadata;
+  const merged = lib.mergeTool(stored, importedTool());
+  assert.strictEqual(merged.metadata.notes, 'new note');
+});
+
+test('buildLibrary keeps tools that are not imported and adds new ones', () => {
+  const other = { id: 3, toolId: 3, toolNumber: null, name: 'Other', type: 'flat', diameter: 6 };
+  const added = { ...importedTool(), toolId: 200, toolNumber: null };
+  const library = lib.buildLibrary([other, storedTool()], [importedTool(), added]);
+  assert.deepStrictEqual([...library.map(t => t.toolId)], [3, 26, 200]);
+  assert.strictEqual(library[0], other);
+  assert.strictEqual(library[1].offsets.tlo, -41.25);
+});
+
 // ---------- runner ----------
 let passed = 0;
 let failed = 0;
