@@ -327,6 +327,24 @@ test('numberingNotice speaks up only in Slot numbering', () => {
   assert.strictEqual(lib.numberingNotice({ numbering: 'toolId' }), '');
 });
 
+// ---------- Dialog scripts share the page's global scope ----------
+test('the helpers script can run twice in one page (dialog reopened)', () => {
+  const page = { window: {} };
+  vm.createContext(page);
+  vm.runInContext(match[1], page);
+  vm.runInContext(match[1], page);
+  assert.strictEqual(typeof page.window.__fusionImportInternals.planImport, 'function');
+});
+
+test('the helpers script does not clash with names from another plugin', () => {
+  const page = { window: {} };
+  vm.createContext(page);
+  vm.runInContext('const escapeHtml = 1; const TYPE_MAPPING = 2; function planImport() {}', page);
+  vm.runInContext(match[1], page);
+  vm.runInContext('const parseTSVData = 3; const mergeTool = 4;', page);
+  assert.strictEqual(typeof page.window.__fusionImportInternals.escapeHtml, 'function');
+});
+
 // ---------- runner ----------
 let passed = 0;
 let failed = 0;
