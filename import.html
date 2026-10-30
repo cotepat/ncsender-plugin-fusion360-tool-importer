@@ -829,7 +829,7 @@
         library
           .filter(t => t.toolNumber === slot && t.toolId !== tool.toolId)
           .forEach(other => {
-            problems.push({ toolId: tool.toolId, message: `Slot ${slot} is also assigned to T${other.toolId}` });
+            problems.push({ toolId: tool.toolId, message: `Slot ${slot} is also assigned to Tool ID ${other.toolId}` });
           });
       });
 

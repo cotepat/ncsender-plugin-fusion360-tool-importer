@@ -288,7 +288,7 @@ test('planImport flags a slot another library tool holds', () => {
   const { problems } = lib.planImport([slotted(84, 3)], [slotted(200, 3)], magazine8);
   assert.strictEqual(problems.length, 1);
   assert.strictEqual(problems[0].toolId, 200);
-  assert.ok(problems[0].message.includes('T84'));
+  assert.ok(problems[0].message.includes('Tool ID 84'));
 });
 
 test('planImport flags both tools when an import puts two in one slot', () => {
