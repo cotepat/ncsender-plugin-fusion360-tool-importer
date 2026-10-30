@@ -257,6 +257,32 @@
     font-size: 0.9rem;
   }
 
+  .fusion-note {
+    background: var(--color-surface-muted, #1a1a1a);
+    border: 1px solid var(--color-border, #444);
+    color: var(--color-text-secondary, #999);
+    padding: 12px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+  }
+
+  .fusion-warning {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid #ffc107;
+    color: #ffc107;
+    padding: 12px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+  }
+
+  .fusion-slot-problem {
+    color: #dc3545;
+    font-size: 0.85rem;
+    margin-top: 4px;
+  }
+
   .fusion-success {
     background: rgba(26, 188, 156, 0.1);
     border: 1px solid #1abc9c;
@@ -313,6 +339,9 @@
     <p>Import tools from Fusion 360 tool library (JSON file or clipboard paste)</p>
   </div>
 
+  <!-- Numbering Notice -->
+  <div id="numberingNotice" class="fusion-note fusion-hidden"></div>
+
   <!-- File Selector -->
   <div id="fileSelector" class="fusion-file-selector">
     <input type="file" id="fileInput" accept=".json">
@@ -338,6 +367,9 @@
       <label for="preserveToolNumber">Do not overwrite ncSender Slot number with Fusion 360 turret number (keep existing)</label>
     </div>
   </div>
+
+  <!-- Issues with this import. Stays up, unlike the error display. -->
+  <div id="issuesDisplay" class="fusion-warning fusion-hidden"></div>
 
   <!-- Error Display -->
   <div id="errorDisplay" class="fusion-error fusion-hidden"></div>
@@ -717,18 +749,35 @@
     return result;
   }
 
-  // Mutates newTools so the displayed slot matches what import will actually use.
-  // Without this, preserve-mode shows "No Slot" on first render even when the library
-  // tool already has a slot assigned.
+  // Decides the slot each tool will be saved with, so the table shows what import
+  // will actually do. Preserving keeps the library's slot. Otherwise the Fusion
+  // turret wins, but a tool with no turret number keeps its slot: Fusion leaves
+  // the turret blank or 0 for most tools, and that must not empty the magazine.
   function applyPreservedSlots(newTools, existingTools, settings) {
-    if (!settings.preserveToolNumber) return newTools;
     return newTools.map(t => {
       const existing = existingTools.find(e => e.toolId === t.toolId);
-      if (existing && existing.toolNumber != null) {
-        return { ...t, toolNumber: existing.toolNumber };
+      if (existing && (settings.preserveToolNumber || t.toolNumber == null)) {
+        return { ...t, toolNumber: existing.toolNumber ?? null };
       }
       return t;
     });
+  }
+
+  // tool.numbering, tool.count and the probe slot from GET /api/settings. A
+  // magazine size of 0 means none is known, so slots aren't range-checked.
+  function readMachine(appSettings) {
+    const tool = (appSettings && appSettings.tool) || {};
+    return {
+      numbering: tool.numbering === 'toolId' ? 'toolId' : 'slot',
+      magazineSize: Number.isInteger(tool.count) ? tool.count : 0,
+      probeSlot: tool.probe ? (tool.probeToolNumber ?? 99) : null
+    };
+  }
+
+  function numberingNotice(machine) {
+    return machine.numbering === 'slot'
+      ? 'ncSender is using Slot numbering: M6 T5 loads slot 5. Tool IDs don\'t select tools, only the slot a tool is assigned to does.'
+      : '';
   }
 
   // Fusion owns what it exports. Everything ncSender measures or stores on the
@@ -748,18 +797,40 @@
     };
   }
 
-  // The whole library as it will be saved: PUT /api/tools replaces everything.
-  function buildLibrary(existingTools, toolsToImport) {
+  // The whole library as it will be saved (PUT /api/tools replaces everything),
+  // plus what is wrong with the slots this import assigns. ncSender doesn't check
+  // a bulk save: with two tools in a slot it silently uses the first, and a slot
+  // past the magazine is never loaded. Slots the import leaves alone aren't judged.
+  function planImport(existingTools, toolsToImport, machine) {
     const library = [...existingTools];
+    const assigned = [];
     toolsToImport.forEach(tool => {
       const index = library.findIndex(t => t.toolId === tool.toolId);
+      const slotBefore = index >= 0 ? library[index].toolNumber : null;
       if (index >= 0) {
         library[index] = mergeTool(library[index], tool);
       } else {
         library.push(tool);
       }
+      if (tool.toolNumber != null && tool.toolNumber !== slotBefore) {
+        assigned.push(tool);
+      }
     });
-    return library;
+
+    const problems = [];
+    assigned.forEach(tool => {
+      const slot = tool.toolNumber;
+      if (machine.magazineSize > 0 && slot > machine.magazineSize && slot !== machine.probeSlot) {
+        problems.push({ toolId: tool.toolId, message: `Slot ${slot} is past the ${machine.magazineSize}-slot magazine` });
+      }
+      library
+        .filter(t => t.toolNumber === slot && t.toolId !== tool.toolId)
+        .forEach(other => {
+          problems.push({ toolId: tool.toolId, message: `Slot ${slot} is also assigned to T${other.toolId}` });
+        });
+    });
+
+    return { library, problems };
   }
 
   // Expose for test runner. Does not pollute global in any meaningful way.
@@ -767,7 +838,7 @@
     window.__fusionImportInternals = {
       TYPE_MAPPING, escapeHtml, parseTSVLine, parseTSVData,
       convertTSVTool, convertFusionTool, computeComparison, applyPreservedSlots,
-      splitDuplicates, mergeTool, buildLibrary
+      splitDuplicates, readMachine, numberingNotice, mergeTool, planImport
     };
   }
 </script>
@@ -781,6 +852,8 @@
     let existingTools = [];
     let newTools = [];
     let duplicateTools = [];
+    let slotProblems = [];
+    let machine = readMachine(null);
     let comparison = [];
     let dataSource = null; // 'file' or 'clipboard'
     let originalData = null; // Store original data for rebuilding
@@ -794,6 +867,22 @@
     document.getElementById('preserveToolNumber').checked = settings.preserveToolNumber;
 
     loadExistingTools();
+    loadMachine();
+
+    async function loadMachine() {
+      try {
+        const response = await fetch('/api/settings');
+        if (response.ok) {
+          machine = readMachine(await response.json());
+          const notice = numberingNotice(machine);
+          const noticeEl = document.getElementById('numberingNotice');
+          noticeEl.textContent = notice;
+          noticeEl.classList.toggle('fusion-hidden', !notice);
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+      }
+    }
 
     async function loadExistingTools() {
       try {
@@ -932,6 +1021,8 @@
 
     function rebuildComparison() {
       comparison = computeComparison(existingTools, newTools, settings, duplicateTools);
+      const importable = comparison.filter(c => c.status === 'new' || c.status === 'modified').map(c => c.tool);
+      slotProblems = planImport(existingTools, importable, machine).problems;
       updateUI();
     }
 
@@ -945,6 +1036,17 @@
       document.getElementById('statModified').textContent = modifiedCount;
       document.getElementById('newCount').textContent = newCount;
       document.getElementById('modifiedCount').textContent = newCount + modifiedCount;
+
+      const issues = [];
+      if (duplicateTools.length > 0) {
+        issues.push(`${duplicateTools.length} tool(s) reuse a Fusion number and won't be imported. Give them their own number in Fusion to import them.`);
+      }
+      if (slotProblems.length > 0) {
+        issues.push('Tools with a slot problem can\'t be imported. Turn on "Do not overwrite ncSender Slot number" or fix the turret number in Fusion.');
+      }
+      const issuesEl = document.getElementById('issuesDisplay');
+      issuesEl.textContent = issues.join(' ');
+      issuesEl.classList.toggle('fusion-hidden', issues.length === 0);
 
       const tbody = document.getElementById('tableBody');
       tbody.innerHTML = comparison.map(item => {
@@ -965,6 +1067,11 @@
           ? escapeHtml(item.changes.join(', '))
           : '-';
 
+        const problemsDisplay = item.status === 'duplicate' ? '' : slotProblems
+          .filter(p => p.toolId === item.tool.toolId)
+          .map(p => `<div class="fusion-slot-problem">${escapeHtml(p.message)}</div>`)
+          .join('');
+
         return `
           <tr>
             <td><span class="fusion-status-badge ${statusClass}">${item.status}</span></td>
@@ -972,7 +1079,7 @@
             <td>${escapeHtml(item.tool.name)}</td>
             <td>${escapeHtml(item.tool.type)}</td>
             <td>${item.tool.diameter.toFixed(3)} mm</td>
-            <td>${changesDisplay}</td>
+            <td>${changesDisplay}${problemsDisplay}</td>
           </tr>
         `;
       }).join('');
@@ -1154,13 +1261,20 @@
           throw new Error('Could not read the current library');
         }
         existingTools = await current.json();
+        await loadMachine();
 
-        const library = buildLibrary(existingTools, applyPreservedSlots(toolsToImport, existingTools, settings));
+        const plan = planImport(existingTools, applyPreservedSlots(toolsToImport, existingTools, settings), machine);
+        if (plan.problems.length > 0) {
+          newTools = applyPreservedSlots(newTools, existingTools, settings);
+          rebuildComparison();
+          showError('Nothing was imported: fix the slot problems shown in the table first.');
+          return;
+        }
 
         const response = await fetch('/api/tools', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(library)
+          body: JSON.stringify(plan.library)
         });
 
         if (!response.ok) {

@@ -211,13 +211,14 @@ test('mergeTool handles a stored tool with no metadata', () => {
   assert.strictEqual(merged.metadata.notes, 'new note');
 });
 
-test('buildLibrary keeps tools that are not imported and adds new ones', () => {
+test('planImport keeps tools that are not imported and adds new ones', () => {
   const other = { id: 3, toolId: 3, toolNumber: null, name: 'Other', type: 'flat', diameter: 6 };
   const added = { ...importedTool(), toolId: 200, toolNumber: null };
-  const library = lib.buildLibrary([other, storedTool()], [importedTool(), added]);
+  const { library, problems } = lib.planImport([other, storedTool()], [importedTool(), added], { magazineSize: 8, probeSlot: null });
   assert.deepStrictEqual([...library.map(t => t.toolId)], [3, 26, 200]);
   assert.strictEqual(library[0], other);
   assert.strictEqual(library[1].offsets.tlo, -41.25);
+  assert.strictEqual(problems.length, 0);
 });
 
 // ---------- Duplicate Fusion numbers ----------
@@ -250,6 +251,80 @@ test('parseTSVData returns every row so duplicates can be reported', () => {
   const tsv = [header, '1\t5\t6\tFirst', '2\t5\t8\tSecond'].join('\n');
   const tools = lib.parseTSVData(tsv, { preserveToolNumber: true });
   assert.strictEqual(tools.length, 2);
+});
+
+// ---------- Slots ----------
+const magazine8 = { magazineSize: 8, probeSlot: null };
+const slotted = (toolId, toolNumber) => ({ toolId, toolNumber, name: `T${toolId}`, type: 'flat', diameter: 6, metadata: {} });
+
+test('applyPreservedSlots keeps the slot when the Fusion turret is blank and preserve is off', () => {
+  const result = lib.applyPreservedSlots([slotted(84, null)], [slotted(84, 3)], { preserveToolNumber: false });
+  assert.strictEqual(result[0].toolNumber, 3);
+});
+
+test('applyPreservedSlots follows a slot that changed in the library since parsing', () => {
+  const result = lib.applyPreservedSlots([slotted(84, 3)], [slotted(84, undefined)], { preserveToolNumber: true });
+  assert.strictEqual(result[0].toolNumber, null);
+});
+
+test('planImport flags a slot past the magazine', () => {
+  const { problems } = lib.planImport([], [slotted(201, 20)], magazine8);
+  assert.strictEqual(problems.length, 1);
+  assert.strictEqual(problems[0].toolId, 201);
+  assert.ok(problems[0].message.includes('past the 8-slot magazine'));
+});
+
+test('planImport allows the probe slot past the magazine', () => {
+  const { problems } = lib.planImport([], [slotted(201, 99)], { magazineSize: 8, probeSlot: 99 });
+  assert.strictEqual(problems.length, 0);
+});
+
+test('planImport skips the range check when the magazine size is unknown', () => {
+  const { problems } = lib.planImport([], [slotted(201, 20)], { magazineSize: 0, probeSlot: null });
+  assert.strictEqual(problems.length, 0);
+});
+
+test('planImport flags a slot another library tool holds', () => {
+  const { problems } = lib.planImport([slotted(84, 3)], [slotted(200, 3)], magazine8);
+  assert.strictEqual(problems.length, 1);
+  assert.strictEqual(problems[0].toolId, 200);
+  assert.ok(problems[0].message.includes('T84'));
+});
+
+test('planImport flags both tools when an import puts two in one slot', () => {
+  const { problems } = lib.planImport([], [slotted(200, 3), slotted(201, 3)], magazine8);
+  assert.deepStrictEqual([...problems.map(p => p.toolId)].sort(), [200, 201]);
+});
+
+test('planImport allows a swap made in one import', () => {
+  const { problems } = lib.planImport([slotted(84, 3), slotted(88, 2)], [slotted(84, 2), slotted(88, 3)], magazine8);
+  assert.strictEqual(problems.length, 0);
+});
+
+test('planImport does not judge slots the import leaves alone', () => {
+  const existing = [slotted(1, 20), slotted(2, 5), slotted(3, 5)];
+  const { problems } = lib.planImport(existing, [slotted(1, 20), slotted(2, 5)], magazine8);
+  assert.strictEqual(problems.length, 0);
+});
+
+// ---------- Numbering ----------
+test('readMachine reads numbering, magazine size and probe slot', () => {
+  const machine = lib.readMachine({ tool: { numbering: 'toolId', count: 8, probe: true, probeToolNumber: 90 } });
+  assert.strictEqual(machine.numbering, 'toolId');
+  assert.strictEqual(machine.magazineSize, 8);
+  assert.strictEqual(machine.probeSlot, 90);
+});
+
+test('readMachine treats missing settings as Slot numbering with no known magazine', () => {
+  const machine = lib.readMachine(null);
+  assert.strictEqual(machine.numbering, 'slot');
+  assert.strictEqual(machine.magazineSize, 0);
+  assert.strictEqual(machine.probeSlot, null);
+});
+
+test('numberingNotice speaks up only in Slot numbering', () => {
+  assert.ok(lib.numberingNotice({ numbering: 'slot' }).includes('M6 T5 loads slot 5'));
+  assert.strictEqual(lib.numberingNotice({ numbering: 'toolId' }), '');
 });
 
 // ---------- runner ----------
