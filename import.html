@@ -283,6 +283,12 @@
     margin-top: 4px;
   }
 
+  .fusion-slot-takeover {
+    color: #ffc107;
+    font-size: 0.85rem;
+    margin-top: 4px;
+  }
+
   .fusion-success {
     background: rgba(26, 188, 156, 0.1);
     border: 1px solid #1abc9c;
@@ -365,6 +371,10 @@
     <div class="fusion-config-item">
       <input type="checkbox" id="preserveToolNumber">
       <label for="preserveToolNumber">Do not overwrite ncSender Slot number with Fusion 360 turret number (keep existing)</label>
+    </div>
+    <div id="takeOverSlotsRow" class="fusion-config-item fusion-hidden">
+      <input type="checkbox" id="takeOverSlots">
+      <label for="takeOverSlots">Let Fusion 360 turret numbers take over occupied slots (the tool in that slot loses its slot)</label>
     </div>
   </div>
 
@@ -759,8 +769,9 @@
     function applyPreservedSlots(newTools, existingTools, settings) {
       return newTools.map(t => {
         const existing = existingTools.find(e => e.toolId === t.toolId);
-        if (existing && (settings.preserveToolNumber || t.toolNumber == null)) {
-          return { ...t, toolNumber: existing.toolNumber ?? null };
+        if (existing && (settings.preserveToolNumber || t.toolNumber == null || t.keptSlot)) {
+          // keptSlot: this slot came from the library, not from a Fusion turret.
+          return { ...t, toolNumber: existing.toolNumber ?? null, keptSlot: true };
         }
         return t;
       });
@@ -771,10 +782,21 @@
     function readMachine(appSettings) {
       const tool = (appSettings && appSettings.tool) || {};
       return {
+        known: Boolean(appSettings),
         numbering: tool.numbering === 'toolId' ? 'toolId' : 'slot',
         magazineSize: Number.isInteger(tool.count) ? tool.count : 0,
         probeSlot: tool.probe ? (tool.probeToolNumber ?? 99) : null
       };
+    }
+
+    // Slot numbering only: there, the slot alone decides what loads, so Fusion's
+    // turret can be the source of truth for the magazine.
+    function canTakeOverSlots(settings, machine) {
+      return machine.known && machine.numbering === 'slot' && !settings.preserveToolNumber;
+    }
+
+    function takesOverSlots(settings, machine) {
+      return Boolean(settings.takeOverSlots) && canTakeOverSlots(settings, machine);
     }
 
     function numberingNotice(machine) {
@@ -804,10 +826,16 @@
     // plus what is wrong with the slots this import assigns. ncSender doesn't check
     // a bulk save: with two tools in a slot it silently uses the first, and a slot
     // past the magazine is never loaded. Slots the import leaves alone aren't judged.
-    function planImport(existingTools, toolsToImport, machine) {
+    //
+    // options.takeOverSlots: an assigned slot's current holder loses the slot and
+    // nothing else, unless Fusion also gives it that turret (options.fileTools is
+    // every tool in the source, since unchanged ones aren't imported): then the
+    // source contradicts itself and there is no right answer to pick.
+    function planImport(existingTools, toolsToImport, machine, options = {}) {
+      const fileTools = options.fileTools || toolsToImport;
       const library = [...existingTools];
       const assigned = [];
-      toolsToImport.forEach(tool => {
+      toolsToImport.forEach(({ keptSlot, ...tool }) => {
         const index = library.findIndex(t => t.toolId === tool.toolId);
         const slotBefore = index >= 0 ? library[index].toolNumber : null;
         if (index >= 0) {
@@ -821,6 +849,7 @@
       });
 
       const problems = [];
+      const evictions = [];
       assigned.forEach(tool => {
         const slot = tool.toolNumber;
         if (machine.magazineSize > 0 && slot > machine.magazineSize && slot !== machine.probeSlot) {
@@ -829,17 +858,28 @@
         library
           .filter(t => t.toolNumber === slot && t.toolId !== tool.toolId)
           .forEach(other => {
-            problems.push({ toolId: tool.toolId, message: `Slot ${slot} is also assigned to Tool ID ${other.toolId}` });
+            const fusionAgrees = fileTools.some(t => t.toolId === other.toolId && !t.keptSlot && t.toolNumber === slot);
+            if (options.takeOverSlots && !fusionAgrees) {
+              evictions.push({ toolId: other.toolId, slot, byToolId: tool.toolId });
+            } else {
+              problems.push({ toolId: tool.toolId, message: `Slot ${slot} is also assigned to Tool ID ${other.toolId}` });
+            }
           });
       });
 
-      return { library, problems };
+      const evicted = new Set(evictions.map(e => e.toolId));
+      return {
+        library: library.map(t => (evicted.has(t.toolId) ? { ...t, toolNumber: null } : t)),
+        problems,
+        evictions
+      };
     }
 
     return {
       TYPE_MAPPING, escapeHtml, parseTSVLine, parseTSVData,
       convertTSVTool, convertFusionTool, computeComparison, applyPreservedSlots,
-      splitDuplicates, readMachine, numberingNotice, mergeTool, planImport
+      splitDuplicates, readMachine, canTakeOverSlots, takesOverSlots, numberingNotice,
+      mergeTool, planImport
     };
   })();
 </script>
@@ -848,7 +888,7 @@
   (function() {
     const {
       escapeHtml, parseTSVData, convertFusionTool, computeComparison, applyPreservedSlots,
-      splitDuplicates, readMachine, numberingNotice, planImport
+      splitDuplicates, readMachine, canTakeOverSlots, takesOverSlots, numberingNotice, planImport
     } = window.__fusionImportInternals;
 
     const initialConfig = __INITIAL_CONFIG__;
@@ -859,18 +899,21 @@
     let newTools = [];
     let duplicateTools = [];
     let slotProblems = [];
+    let slotEvictions = [];
     let machine = readMachine(null);
     let comparison = [];
     let dataSource = null; // 'file' or 'clipboard'
     let originalData = null; // Store original data for rebuilding
     let settings = {
       includeFusionToolNumber: initialConfig && initialConfig.includeFusionToolNumber !== undefined ? initialConfig.includeFusionToolNumber : false,
-      preserveToolNumber: initialConfig && initialConfig.preserveToolNumber !== undefined ? initialConfig.preserveToolNumber : true
+      preserveToolNumber: initialConfig && initialConfig.preserveToolNumber !== undefined ? initialConfig.preserveToolNumber : true,
+      takeOverSlots: initialConfig && initialConfig.takeOverSlots !== undefined ? initialConfig.takeOverSlots : false
     };
 
     // Apply persisted settings to checkboxes
     document.getElementById('includeFusionToolNumber').checked = settings.includeFusionToolNumber;
     document.getElementById('preserveToolNumber').checked = settings.preserveToolNumber;
+    document.getElementById('takeOverSlots').checked = settings.takeOverSlots;
 
     loadExistingTools();
     loadMachine();
@@ -884,10 +927,23 @@
           const noticeEl = document.getElementById('numberingNotice');
           noticeEl.textContent = notice;
           noticeEl.classList.toggle('fusion-hidden', !notice);
+          updateTakeOverOption();
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
       }
+    }
+
+    function updateTakeOverOption() {
+      document.getElementById('takeOverSlotsRow').classList.toggle('fusion-hidden', !canTakeOverSlots(settings, machine));
+    }
+
+    // What an import of these tools would save, and what stands in its way.
+    function planFor(tools) {
+      return planImport(existingTools, tools, machine, {
+        takeOverSlots: takesOverSlots(settings, machine),
+        fileTools: newTools
+      });
     }
 
     async function loadExistingTools() {
@@ -1028,7 +1084,9 @@
     function rebuildComparison() {
       comparison = computeComparison(existingTools, newTools, settings, duplicateTools);
       const importable = comparison.filter(c => c.status === 'new' || c.status === 'modified').map(c => c.tool);
-      slotProblems = planImport(existingTools, importable, machine).problems;
+      const plan = planFor(importable);
+      slotProblems = plan.problems;
+      slotEvictions = plan.evictions;
       updateUI();
     }
 
@@ -1048,7 +1106,13 @@
         issues.push(`${duplicateTools.length} tool(s) reuse a Fusion number and won't be imported. Give them their own number in Fusion to import them.`);
       }
       if (slotProblems.length > 0) {
-        issues.push('Tools with a slot problem can\'t be imported. Turn on "Do not overwrite ncSender Slot number" or fix the turret number in Fusion.');
+        issues.push(canTakeOverSlots(settings, machine) && !settings.takeOverSlots
+          ? 'Tools with a slot problem can\'t be imported. Turn on "Let Fusion 360 turret numbers take over occupied slots", or fix the turret number in Fusion.'
+          : 'Tools with a slot problem can\'t be imported. Fix the turret number in Fusion, or turn on "Do not overwrite ncSender Slot number".');
+      }
+      if (slotEvictions.length > 0) {
+        const lost = slotEvictions.map(e => `Tool ID ${e.toolId} (slot ${e.slot})`).join(', ');
+        issues.push(`Import All will remove these tools from their slots: ${lost}.`);
       }
       const issuesEl = document.getElementById('issuesDisplay');
       issuesEl.textContent = issues.join(' ');
@@ -1058,7 +1122,11 @@
       tbody.innerHTML = comparison.map(item => {
         const statusClass = `fusion-status-${item.status}`;
 
-        const slotBadge = item.tool.toolNumber != null
+        const isDuplicate = item.status === 'duplicate';
+        const loses = isDuplicate ? [] : slotEvictions.filter(e => e.toolId === item.tool.toolId);
+        const takes = isDuplicate ? [] : slotEvictions.filter(e => e.byToolId === item.tool.toolId);
+
+        const slotBadge = item.tool.toolNumber != null && loses.length === 0
           ? `<span class="fusion-tool-number-badge">Slot${escapeHtml(item.tool.toolNumber)}</span>`
           : `<span class="fusion-tool-slot-placeholder">No Slot</span>`;
 
@@ -1073,10 +1141,15 @@
           ? escapeHtml(item.changes.join(', '))
           : '-';
 
-        const problemsDisplay = item.status === 'duplicate' ? '' : slotProblems
+        const problemsDisplay = isDuplicate ? '' : slotProblems
           .filter(p => p.toolId === item.tool.toolId)
           .map(p => `<div class="fusion-slot-problem">${escapeHtml(p.message)}</div>`)
           .join('');
+
+        const takeoverDisplay = [
+          ...takes.map(e => `Takes slot ${e.slot} from Tool ID ${e.toolId}`),
+          ...loses.map(e => `Loses slot ${e.slot} to Tool ID ${e.byToolId}`)
+        ].map(text => `<div class="fusion-slot-takeover">${escapeHtml(text)}</div>`).join('');
 
         return `
           <tr>
@@ -1085,7 +1158,7 @@
             <td>${escapeHtml(item.tool.name)}</td>
             <td>${escapeHtml(item.tool.type)}</td>
             <td>${item.tool.diameter.toFixed(3)} mm</td>
-            <td>${changesDisplay}${problemsDisplay}</td>
+            <td>${changesDisplay}${problemsDisplay}${takeoverDisplay}</td>
           </tr>
         `;
       }).join('');
@@ -1121,6 +1194,7 @@
 
     document.getElementById('preserveToolNumber').onchange = async function(event) {
       settings.preserveToolNumber = event.target.checked;
+      updateTakeOverOption();
       await saveSettings();
 
       try {
@@ -1129,6 +1203,12 @@
         showError('Failed to rebuild tools: ' + error.message);
       }
 
+      rebuildComparison();
+    };
+
+    document.getElementById('takeOverSlots').onchange = async function(event) {
+      settings.takeOverSlots = event.target.checked;
+      await saveSettings();
       rebuildComparison();
     };
 
@@ -1269,9 +1349,9 @@
         existingTools = await current.json();
         await loadMachine();
 
-        const plan = planImport(existingTools, applyPreservedSlots(toolsToImport, existingTools, settings), machine);
+        newTools = applyPreservedSlots(newTools, existingTools, settings);
+        const plan = planFor(applyPreservedSlots(toolsToImport, existingTools, settings));
         if (plan.problems.length > 0) {
-          newTools = applyPreservedSlots(newTools, existingTools, settings);
           rebuildComparison();
           showError('Nothing was imported: fix the slot problems shown in the table first.');
           return;
@@ -1288,7 +1368,8 @@
           throw new Error(error.error || 'Failed to import tools');
         }
 
-        showSuccess(`Successfully imported ${toolsToImport.length} tool(s)!`);
+        const lostSlots = plan.evictions.length > 0 ? ` ${plan.evictions.length} other tool(s) lost their slot.` : '';
+        showSuccess(`Successfully imported ${toolsToImport.length} tool(s)!${lostSlots}`);
 
         setTimeout(() => {
           window.parent.postMessage({ type: 'close-plugin-dialog' }, '*');

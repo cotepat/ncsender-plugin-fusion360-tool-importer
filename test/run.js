@@ -307,6 +307,92 @@ test('planImport does not judge slots the import leaves alone', () => {
   assert.strictEqual(problems.length, 0);
 });
 
+// ---------- Turret numbers taking over occupied slots ----------
+const takeOver = { takeOverSlots: true };
+
+test('take over: the holder loses only its slot', () => {
+  const holder = { ...storedTool(), toolId: 51, id: 51, toolNumber: 3 };
+  const { library, problems, evictions } = lib.planImport([holder], [slotted(21, 3)], magazine8, takeOver);
+  assert.strictEqual(problems.length, 0);
+  assert.deepStrictEqual([...evictions.map(e => ({ ...e }))], [{ toolId: 51, slot: 3, byToolId: 21 }]);
+  const saved = library.find(t => t.toolId === 51);
+  assert.strictEqual(saved.toolNumber, null);
+  assert.strictEqual(saved.offsets.tlo, -41.25);
+  assert.strictEqual(saved.name, 'Old name');
+  assert.strictEqual(library.find(t => t.toolId === 21).toolNumber, 3);
+  assert.strictEqual(holder.toolNumber, 3, 'the library read is not mutated');
+});
+
+test('take over: a holder Fusion leaves without a turret still loses the slot', () => {
+  const settings = { preserveToolNumber: false };
+  const existing = [slotted(51, 3)];
+  const file = lib.applyPreservedSlots([slotted(51, null), slotted(21, 3)], existing, settings);
+  const { problems, evictions } = lib.planImport(existing, file, magazine8, { ...takeOver, fileTools: file });
+  assert.strictEqual(problems.length, 0);
+  assert.strictEqual(evictions[0].toolId, 51);
+});
+
+test('take over: stops when Fusion gives a holder the same turret', () => {
+  // Tool 51 is unchanged, so it is in the file but not among the tools imported.
+  const file = [slotted(51, 3), slotted(21, 3)];
+  const { problems, evictions } = lib.planImport([slotted(51, 3)], [slotted(21, 3)], magazine8, { ...takeOver, fileTools: file });
+  assert.strictEqual(evictions.length, 0);
+  assert.strictEqual(problems.length, 1);
+  assert.ok(problems[0].message.includes('Tool ID 51'));
+});
+
+test('take over: stops when two imported tools want one slot', () => {
+  const { problems } = lib.planImport([], [slotted(200, 3), slotted(201, 3)], magazine8, takeOver);
+  assert.strictEqual(problems.length, 2);
+});
+
+test('take over: a slot past the magazine is still a problem', () => {
+  const { problems } = lib.planImport([], [slotted(201, 20)], magazine8, takeOver);
+  assert.strictEqual(problems.length, 1);
+});
+
+test('take over: a holder moving elsewhere in the same import is not evicted', () => {
+  const existing = [slotted(51, 3), slotted(21, 2)];
+  const { library, evictions } = lib.planImport(existing, [slotted(21, 3), slotted(51, 2)], magazine8, takeOver);
+  assert.strictEqual(evictions.length, 0);
+  assert.strictEqual(library.find(t => t.toolId === 51).toolNumber, 2);
+});
+
+test('planImport does not save the keptSlot marker on a new tool', () => {
+  const { library } = lib.planImport([], [{ ...slotted(200, null), keptSlot: true }], magazine8);
+  assert.ok(!('keptSlot' in library[0]));
+});
+
+test('applyPreservedSlots re-reads a kept slot but leaves a Fusion turret alone', () => {
+  const settings = { preserveToolNumber: false };
+  const kept = lib.applyPreservedSlots([slotted(84, null)], [slotted(84, 3)], settings);
+  assert.strictEqual(kept[0].keptSlot, true);
+  const moved = lib.applyPreservedSlots(kept, [slotted(84, 5)], settings);
+  assert.strictEqual(moved[0].toolNumber, 5);
+  const turret = lib.applyPreservedSlots([slotted(84, 2)], [slotted(84, 5)], settings);
+  assert.strictEqual(turret[0].toolNumber, 2);
+  assert.ok(!turret[0].keptSlot);
+});
+
+test('take over is offered only in Slot numbering with preserve off', () => {
+  const slot = lib.readMachine({ tool: { numbering: 'slot' } });
+  const toolId = lib.readMachine({ tool: { numbering: 'toolId' } });
+  const unknown = lib.readMachine(null);
+  assert.strictEqual(lib.canTakeOverSlots({ preserveToolNumber: false }, slot), true);
+  assert.strictEqual(lib.canTakeOverSlots({ preserveToolNumber: true }, slot), false);
+  assert.strictEqual(lib.canTakeOverSlots({ preserveToolNumber: false }, toolId), false);
+  assert.strictEqual(lib.canTakeOverSlots({ preserveToolNumber: false }, unknown), false);
+});
+
+test('take over needs the option on, and a saved option does nothing in Tool ID numbering', () => {
+  const slot = lib.readMachine({ tool: { numbering: 'slot' } });
+  const toolId = lib.readMachine({ tool: { numbering: 'toolId' } });
+  assert.strictEqual(lib.takesOverSlots({ preserveToolNumber: false, takeOverSlots: false }, slot), false);
+  assert.strictEqual(lib.takesOverSlots({ preserveToolNumber: false, takeOverSlots: true }, slot), true);
+  assert.strictEqual(lib.takesOverSlots({ preserveToolNumber: false, takeOverSlots: true }, toolId), false);
+  assert.strictEqual(lib.takesOverSlots({ preserveToolNumber: true, takeOverSlots: true }, slot), false);
+});
+
 // ---------- Numbering ----------
 test('readMachine reads numbering, magazine size and probe slot', () => {
   const machine = lib.readMachine({ tool: { numbering: 'toolId', count: 8, probe: true, probeToolNumber: 90 } });
