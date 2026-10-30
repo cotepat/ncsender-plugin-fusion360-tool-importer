@@ -203,6 +203,11 @@
     color: #6c757d;
   }
 
+  .fusion-status-duplicate {
+    background: rgba(220, 53, 69, 0.2);
+    color: #dc3545;
+  }
+
   .fusion-tool-id-cell {
     display: flex;
     flex-direction: column;
@@ -568,7 +573,6 @@
     });
 
     const tools = [];
-    const seenToolIds = new Set();
     const errors = [];
 
     for (let i = 1; i < lines.length; i++) {
@@ -576,10 +580,7 @@
         const values = parseTSVLine(lines[i]);
         const tool = convertTSVTool(values, columnMap, settings);
         if (tool) {
-          if (!seenToolIds.has(tool.toolId)) {
-            seenToolIds.add(tool.toolId);
-            tools.push(tool);
-          }
+          tools.push(tool);
         }
       } catch (error) {
         errors.push(`Row ${i + 1}: ${error.message}`);
@@ -664,7 +665,25 @@
   // don't get falsely flagged as "modified" against a freshly converted tool.
   function nz(v) { return v == null ? '' : v; }
 
-  function computeComparison(existingTools, newTools, settings) {
+  // Fusion can reuse a tool number, but ncSender holds one tool per Tool ID. The
+  // first one wins; the rest are reported instead of being lost silently.
+  function splitDuplicates(tools) {
+    const firstById = new Map();
+    const unique = [];
+    const duplicates = [];
+    tools.forEach(tool => {
+      const first = firstById.get(tool.toolId);
+      if (first) {
+        duplicates.push({ tool, keptName: first.name });
+      } else {
+        firstById.set(tool.toolId, tool);
+        unique.push(tool);
+      }
+    });
+    return { unique, duplicates };
+  }
+
+  function computeComparison(existingTools, newTools, settings, duplicates = []) {
     const result = newTools.map(newTool => {
       const existing = existingTools.find(t => t.toolId === newTool.toolId);
       let status = 'new';
@@ -684,6 +703,16 @@
       return { status, tool: newTool, existing: existing || null, changes };
     });
 
+    duplicates.forEach(d => {
+      result.push({
+        status: 'duplicate',
+        tool: d.tool,
+        existing: null,
+        changes: [`Same Fusion number as "${d.keptName}", not imported`]
+      });
+    });
+
+    // Stable sort: a duplicate stays right after the tool that was kept.
     result.sort((a, b) => a.tool.toolId - b.tool.toolId);
     return result;
   }
@@ -738,7 +767,7 @@
     window.__fusionImportInternals = {
       TYPE_MAPPING, escapeHtml, parseTSVLine, parseTSVData,
       convertTSVTool, convertFusionTool, computeComparison, applyPreservedSlots,
-      mergeTool, buildLibrary
+      splitDuplicates, mergeTool, buildLibrary
     };
   }
 </script>
@@ -751,6 +780,7 @@
 
     let existingTools = [];
     let newTools = [];
+    let duplicateTools = [];
     let comparison = [];
     let dataSource = null; // 'file' or 'clipboard'
     let originalData = null; // Store original data for rebuilding
@@ -774,6 +804,14 @@
       } catch (error) {
         console.error('Failed to load existing tools:', error);
       }
+    }
+
+    // Every source goes through here, so file and clipboard imports treat
+    // duplicates and slots the same way.
+    function prepareTools(tools) {
+      const { unique, duplicates } = splitDuplicates(tools);
+      duplicateTools = duplicates;
+      return applyPreservedSlots(unique, existingTools, settings);
     }
 
     function selectFile() {
@@ -806,9 +844,8 @@
           return;
         }
 
-        newTools = tools;
         await loadExistingTools();
-        newTools = applyPreservedSlots(newTools, existingTools, settings);
+        newTools = prepareTools(tools);
         rebuildComparison();
 
         document.getElementById('fileSelector').classList.add('fusion-hidden');
@@ -874,7 +911,7 @@
         }
 
         await loadExistingTools();
-        newTools = applyPreservedSlots(newTools, existingTools, settings);
+        newTools = prepareTools(newTools);
         rebuildComparison();
 
         document.getElementById('fileSelector').classList.add('fusion-hidden');
@@ -894,7 +931,7 @@
     };
 
     function rebuildComparison() {
-      comparison = computeComparison(existingTools, newTools, settings);
+      comparison = computeComparison(existingTools, newTools, settings, duplicateTools);
       updateUI();
     }
 
@@ -902,7 +939,7 @@
       const newCount = comparison.filter(c => c.status === 'new').length;
       const modifiedCount = comparison.filter(c => c.status === 'modified').length;
 
-      document.getElementById('statTotal').textContent = newTools.length;
+      document.getElementById('statTotal').textContent = newTools.length + duplicateTools.length;
       document.getElementById('statLibrary').textContent = existingTools.length;
       document.getElementById('statNew').textContent = newCount;
       document.getElementById('statModified').textContent = modifiedCount;
@@ -925,7 +962,7 @@
         `;
 
         const changesDisplay = item.changes && item.changes.length > 0
-          ? item.changes.join(', ')
+          ? escapeHtml(item.changes.join(', '))
           : '-';
 
         return `
@@ -953,7 +990,7 @@
       } else if (dataSource === 'clipboard' && originalData) {
         newTools = parseTSVData(originalData, settings);
       }
-      newTools = applyPreservedSlots(newTools, existingTools, settings);
+      newTools = prepareTools(newTools);
     }
 
     document.getElementById('includeFusionToolNumber').onchange = async function(event) {

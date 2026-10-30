@@ -220,6 +220,38 @@ test('buildLibrary keeps tools that are not imported and adds new ones', () => {
   assert.strictEqual(library[1].offsets.tlo, -41.25);
 });
 
+// ---------- Duplicate Fusion numbers ----------
+test('splitDuplicates keeps the first tool and reports the rest', () => {
+  const tools = [
+    { toolId: 5, name: 'First' },
+    { toolId: 6, name: 'Other' },
+    { toolId: 5, name: 'Second' }
+  ];
+  const { unique, duplicates } = lib.splitDuplicates(tools);
+  assert.deepStrictEqual([...unique.map(t => t.name)], ['First', 'Other']);
+  assert.strictEqual(duplicates.length, 1);
+  assert.strictEqual(duplicates[0].tool.name, 'Second');
+  assert.strictEqual(duplicates[0].keptName, 'First');
+});
+
+test('computeComparison shows a duplicate right after the tool that was kept', () => {
+  const unique = [
+    { toolId: 5, name: 'First', metadata: {} },
+    { toolId: 6, name: 'Other', metadata: {} }
+  ];
+  const duplicates = [{ tool: { toolId: 5, name: 'Second', metadata: {} }, keptName: 'First' }];
+  const result = lib.computeComparison([], unique, { preserveToolNumber: true }, duplicates);
+  assert.deepStrictEqual([...result.map(r => r.status)], ['new', 'duplicate', 'new']);
+  assert.ok(result[1].changes[0].includes('First'));
+});
+
+test('parseTSVData returns every row so duplicates can be reported', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tDescription (tool_description)';
+  const tsv = [header, '1\t5\t6\tFirst', '2\t5\t8\tSecond'].join('\n');
+  const tools = lib.parseTSVData(tsv, { preserveToolNumber: true });
+  assert.strictEqual(tools.length, 2);
+});
+
 // ---------- runner ----------
 let passed = 0;
 let failed = 0;
