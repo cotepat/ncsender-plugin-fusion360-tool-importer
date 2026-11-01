@@ -9,7 +9,7 @@ Each tool's **number of flutes**, **flute length** and **overall length** now co
 - Re-importing updates them, and the preview lists them as changes (**Flutes**, **Flute Length**, **Overall Length**).
 - A tool that Fusion 360 gives no value for keeps what ncSender already has. Other stored data (offsets, image, life, stickout and the rest) is kept, as before.
 
-Re-import your library once to add them to the tools you already have.
+To add them to the tools you already have, import your library once more and click **Import All**: the preview shows those tools as MODIFIED, and **Import New** skips them.
 
 ## ⚙️ Requirements
 

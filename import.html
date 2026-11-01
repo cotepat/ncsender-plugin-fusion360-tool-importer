@@ -492,8 +492,9 @@
         return length > 0 ? Math.round(length * toMm * 100000) / 100000 : null;
       };
       const dimensions = {};
-      if (mm(fluteLength)) dimensions.flute_length = mm(fluteLength);
-      if (mm(overallLength)) dimensions.overall_length = mm(overallLength);
+      const flute = mm(fluteLength), overall = mm(overallLength);
+      if (flute) dimensions.flute_length = flute;
+      if (overall) dimensions.overall_length = overall;
       if (Object.keys(dimensions).length > 0) extras.dimensions = dimensions;
       return extras;
     }

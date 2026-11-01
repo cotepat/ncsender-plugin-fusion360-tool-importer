@@ -243,6 +243,16 @@ test('convertTSVTool reads the flutes and lengths', () => {
   assert.deepStrictEqual({ ...tool.dimensions }, { flute_length: 22, overall_length: 50 });
 });
 
+test('convertTSVTool converts inch lengths and drops blank, bad or negative values', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\t' +
+    'Number of Flutes (tool_numberOfFlutes)\tFlute Length (tool_fluteLength)\tOverall Length (tool_overallLength)';
+  const [inch, bad] = lib.parseTSVData([header, '1\t4\t0.25\tinches\t2\t1\t2.5', '2\t5\t6\tmillimeters\t\tabc\t-1'].join('\n'), { preserveToolNumber: true });
+  assert.strictEqual(inch.metadata.flutes, 2);
+  assert.deepStrictEqual({ ...inch.dimensions }, { flute_length: 25.4, overall_length: 63.5 });
+  assert.strictEqual(bad.metadata.flutes, undefined);
+  assert.strictEqual(bad.dimensions, undefined);
+});
+
 test('mergeTool takes the flutes and lengths and keeps the other dimensions', () => {
   const stored = { ...storedTool(), dimensions: { flute_length: 10, stickout: 30 } };
   const merged = lib.mergeTool(stored, {
@@ -262,6 +272,19 @@ test('computeComparison flags new flutes and lengths, not missing ones', () => {
   const result = lib.computeComparison(existing, changed, { preserveToolNumber: true });
   assert.deepStrictEqual([...result[0].changes], ['Flutes', 'Overall Length']);
   assert.strictEqual(lib.computeComparison(existing, without, { preserveToolNumber: true })[0].status, 'unchanged');
+});
+
+test('planImport saves the flutes and lengths over ncSender\'s stored dimensions', () => {
+  // ncSender's GET /api/tools sends every dimension, the unset ones as null.
+  const stored = { ...storedTool(), metadata: { notes: '', image: '', sku: '' },
+    dimensions: { flute_length: null, overall_length: null, taper_angle: null, radius: null, stickout: 5 } };
+  const incoming = { ...importedTool(), metadata: { notes: '', image: '', sku: '', flutes: 2 }, dimensions: { flute_length: 22 } };
+  assert.deepStrictEqual([...lib.computeComparison([stored], [incoming], { preserveToolNumber: true })[0].changes],
+    ['Description', 'Type', 'Diameter', 'Flutes', 'Flute Length']);
+  const { library } = lib.planImport([stored], [incoming], { magazineSize: 8, probeSlot: null });
+  assert.strictEqual(library[0].metadata.flutes, 2);
+  assert.deepStrictEqual({ ...library[0].dimensions },
+    { flute_length: 22, overall_length: null, taper_angle: null, radius: null, stickout: 5 });
 });
 
 test('planImport keeps tools that are not imported and adds new ones', () => {
