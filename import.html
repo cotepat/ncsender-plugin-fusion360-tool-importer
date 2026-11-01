@@ -481,10 +481,11 @@
       });
     }
 
-    // Fusion's flute count, lengths (in mm) and taper angle (in degrees from the
-    // axis: 45 for a 90° V-bit). ncSender's tool editor doesn't show them but keeps
-    // them, and plugins can read them: the flutes for feeds, the angle for V-bits.
-    function toolExtras(flutes, fluteLength, overallLength, taperAngle, toMm) {
+    // Fusion's flute count, lengths and corner radius (in mm) and taper angle (in
+    // degrees from the axis: 45 for a 90° V-bit). ncSender's tool editor doesn't show
+    // them but keeps them, and plugins can read them: the flutes for feeds, the angle
+    // for V-bits.
+    function toolExtras(flutes, fluteLength, overallLength, taperAngle, cornerRadius, toMm) {
       const extras = {};
       const count = parseInt(flutes, 10);
       if (count > 0) extras.flutes = count;
@@ -498,8 +499,43 @@
       if (overall) dimensions.overall_length = overall;
       const angle = parseFloat(taperAngle);
       if (angle > 0 && angle < 90) dimensions.taper_angle = Math.round(angle * 1000) / 1000;
+      const radius = mm(cornerRadius);
+      if (radius) dimensions.radius = radius;
       if (Object.keys(dimensions).length > 0) extras.dimensions = dimensions;
       return extras;
+    }
+
+    // Fusion types with no single ncSender match. A radius mill (roundover) cuts
+    // DC + 2 RE across: DC is only its tip. A form mill whose profile is a straight
+    // line from the tip out to the full diameter is a V-bit. A tapered mill with no
+    // taper is a ball (round end: cove, bowl) or flat bit, and one with a round tip
+    // is a tapered ball nose, not a V-bit. `geometry` is in the tool's own units.
+    function toolShape(fusionType, geometry) {
+      const type = (fusionType || '').toLowerCase();
+      const radius = geometry.RE > 0 ? geometry.RE : 0;
+      const taper = geometry.TA > 0 ? geometry.TA : 0;
+      if (type === 'radius mill') {
+        return { type: 'flat', diameter: geometry.DC + 2 * radius, taperAngle: taper };
+      }
+      if (type === 'form mill') {
+        const vAngle = straightVAngle(geometry.profile, geometry.DC);
+        if (vAngle) return { type: 'v-bit', diameter: geometry.DC, taperAngle: vAngle };
+      }
+      if (type === 'tapered mill' && (radius > 0 || !taper)) {
+        return { type: radius > 0 ? 'ball' : 'flat', diameter: geometry.DC, taperAngle: taper };
+      }
+      return { type: TYPE_MAPPING[type] || 'flat', diameter: geometry.DC, taperAngle: taper };
+    }
+
+    // The half angle of a form mill's profile when it starts with a straight
+    // line from the tip (0, 0) out to the full radius, or null.
+    function straightVAngle(profile, diameter) {
+      if (!Array.isArray(profile) || profile.length < 2) return null;
+      const start = profile[0].end || [], edge = profile[1];
+      const [x, y] = edge.end || [];
+      if (start[0] !== 0 || start[1] !== 0 || edge.center || !(x > 0) || !(y > 0)) return null;
+      if (Math.abs(x - diameter / 2) > diameter * 0.01) return null;
+      return Math.round(Math.atan2(x, y) * 180 / Math.PI * 1000) / 1000;
     }
 
     function withExtras(tool, extras) {
@@ -578,23 +614,28 @@
       }
 
       const diameterStr = getValue('Diameter (tool_diameter)');
-      const diameter = parseFloat(diameterStr);
-      if (isNaN(diameter) || diameter <= 0) {
+      const tipDiameter = parseFloat(diameterStr);
+      if (isNaN(tipDiameter) || tipDiameter <= 0) {
         throw new Error(`Invalid diameter: ${diameterStr}`);
       }
 
       const unitStr = getValue('Unit (tool_unit)') || '';
       const unit = unitStr.toLowerCase().trim();
 
-      let diameterInMm = diameter;
+      const toolType = getValue('Type (tool_type)') || '';
+      const shape = toolShape(toolType, {
+        DC: tipDiameter,
+        RE: parseFloat(getValue('Corner Radius (tool_cornerRadius)')),
+        TA: parseFloat(getValue('Taper Angle (tool_taperAngle)'))
+      });
+      const ncSenderType = shape.type;
+
+      let diameterInMm = shape.diameter;
       if (unit.includes('inch')) {
-        diameterInMm = diameter * 25.4;
+        diameterInMm = shape.diameter * 25.4;
       }
 
       diameterInMm = Math.round(diameterInMm * 100000) / 100000;
-
-      const toolType = getValue('Type (tool_type)') || '';
-      const ncSenderType = TYPE_MAPPING[toolType.toLowerCase()] || 'flat';
 
       let description = getValue('Description (tool_description)') || '';
       if (!description || description.trim() === '') {
@@ -622,7 +663,8 @@
         getValue('Number of Flutes (tool_numberOfFlutes)'),
         getValue('Flute Length (tool_fluteLength)'),
         getValue('Overall Length (tool_overallLength)'),
-        getValue('Taper Angle (tool_taperAngle)'),
+        shape.taperAngle,
+        getValue('Corner Radius (tool_cornerRadius)'),
         unit.includes('inch') ? 25.4 : 1
       );
 
@@ -684,31 +726,29 @@
         throw new Error('Tool missing Fusion 360 tool number');
       }
 
-      const fusionType = fusionTool.type?.toLowerCase() || '';
-      const ncSenderType = TYPE_MAPPING[fusionType] || 'flat';
-
       let toolNumber = null;
       if (!settings.preserveToolNumber) {
         const turret = Number(fusionTool['post-process']?.turret);
         toolNumber = Number.isInteger(turret) && turret > 0 ? turret : null;
       }
 
-      const diameter = fusionTool.geometry?.DC || 0;
-      if (diameter <= 0) {
-        throw new Error(`Invalid diameter: ${diameter}`);
+      const geometry = fusionTool.geometry || {};
+      if (!(geometry.DC > 0)) {
+        throw new Error(`Invalid diameter: ${geometry.DC || 0}`);
       }
+      const shape = toolShape(fusionTool.type, geometry);
+      const ncSenderType = shape.type;
 
       const toolUnitFromExpressions = fusionTool.expressions?.tool_unit || '';
       const toolUnitFromRoot = fusionTool.unit || '';
       const toolUnit = toolUnitFromExpressions || toolUnitFromRoot;
 
-      let diameterInMm = diameter;
+      let diameterInMm = shape.diameter;
       const unitStr = toolUnit.replace(/['"]/g, '').toLowerCase().trim();
       if (unitStr.includes('inch')) {
-        diameterInMm = diameter * 25.4;
+        diameterInMm = shape.diameter * 25.4;
       }
-      const geometry = fusionTool.geometry || {};
-      const extras = toolExtras(geometry.NOF, geometry.LCF, geometry.OAL, geometry.TA, unitStr.includes('inch') ? 25.4 : 1);
+      const extras = toolExtras(geometry.NOF, geometry.LCF, geometry.OAL, shape.taperAngle, geometry.RE, unitStr.includes('inch') ? 25.4 : 1);
 
       diameterInMm = Math.round(diameterInMm * 100000) / 100000;
 
@@ -792,6 +832,7 @@
           if (lengthChanged(existing, newTool, 'flute_length')) changes.push('Flute Length');
           if (lengthChanged(existing, newTool, 'overall_length')) changes.push('Overall Length');
           if (lengthChanged(existing, newTool, 'taper_angle')) changes.push('Taper Angle');
+          if (lengthChanged(existing, newTool, 'radius')) changes.push('Corner Radius');
 
           status = changes.length > 0 ? 'modified' : 'unchanged';
         }

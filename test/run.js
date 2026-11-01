@@ -235,6 +235,50 @@ test('convertFusionTool reads a V-bit\'s taper angle', () => {
   assert.strictEqual(tool.dimensions.taper_angle, 30);
 });
 
+// ---------- Fusion types with no single ncSender match ----------
+const fusionTool = (type, geometry, unit = 'inches') => lib.convertFusionTool(
+  { 'post-process': { number: 1 }, type, unit, geometry, description: type },
+  { includeFusionToolNumber: false, preserveToolNumber: true });
+
+test('a roundover (radius mill) is as wide as it cuts, not its tip', () => {
+  const tool = fusionTool('radius mill', { DC: 0.007874015748031, RE: 0.25, NOF: 2 });
+  assert.strictEqual(tool.type, 'flat');
+  assert.ok(Math.abs(tool.diameter - 12.9) < 0.001, String(tool.diameter));
+  assert.strictEqual(tool.dimensions.radius, 6.35);
+});
+
+test('a form mill with a straight V profile is a V-bit with its angle', () => {
+  const profile = [{ end: [0, 0] }, { end: [0.125, 0.21650635094611] }, { end: [0.125, 2] }, { end: [0, 2] }];
+  const tool = fusionTool('form mill', { DC: 0.25, NOF: 3, profile });
+  assert.strictEqual(tool.type, 'v-bit');
+  assert.strictEqual(tool.dimensions.taper_angle, 30);
+  // A profile that starts with an arc, or doesn't reach the full width, stays flat.
+  const arc = fusionTool('form mill', { DC: 0.25, profile: [{ end: [0, 0] }, { end: [0.125, 0.2], center: [0, 0.2] }] });
+  const short = fusionTool('form mill', { DC: 0.25, profile: [{ end: [0, 0] }, { end: [0.05, 0.2] }, { end: [0.125, 0.3] }] });
+  assert.strictEqual(arc.type, 'flat');
+  assert.strictEqual(short.type, 'flat');
+  assert.strictEqual(fusionTool('form mill', { DC: 0.25 }).type, 'flat');
+});
+
+test('a tapered mill is a V-bit only when it tapers to a point', () => {
+  const cove = fusionTool('tapered mill', { DC: 0.75, RE: 0.375, TA: 0 });
+  const bowl = fusionTool('tapered mill', { DC: 0.75, RE: 0.25, TA: 0 });
+  const taperedBall = fusionTool('tapered mill', { DC: 0.0625, RE: 0.03125, TA: 5.38 });
+  const straight = fusionTool('tapered mill', { DC: 0.25, TA: 0 });
+  const pointed = fusionTool('tapered mill', { DC: 0.25, TA: 15 });
+  assert.deepStrictEqual([cove.type, bowl.type, taperedBall.type, straight.type, pointed.type], ['ball', 'ball', 'ball', 'flat', 'v-bit']);
+  assert.strictEqual(taperedBall.dimensions.taper_angle, 5.38);
+  assert.strictEqual(cove.dimensions.radius, 9.525);
+});
+
+test('the paste path widens a roundover by its Corner Radius too', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)\tCorner Radius (tool_cornerRadius)';
+  const [tool] = lib.parseTSVData([header, '1\t30\t0.2\tmillimeters\tradius mill\t6.35'].join('\n'), { preserveToolNumber: true });
+  assert.strictEqual(tool.type, 'flat');
+  assert.strictEqual(tool.diameter, 12.9);
+  assert.strictEqual(tool.dimensions.radius, 6.35);
+});
+
 test('convertFusionTool leaves out flutes and lengths Fusion does not give', () => {
   const tool = lib.convertFusionTool({
     'post-process': { number: 3 },

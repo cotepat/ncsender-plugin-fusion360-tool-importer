@@ -21,7 +21,9 @@ This plugin allows you to:
 - **Clipboard Import**: Copy/paste tool data directly from Fusion 360 (TSV format)
 - **File Import**: Import complete tool libraries from JSON exports
 - **Full Metadata**: Names, types, diameters, offsets, and specifications preserved
-- **Flutes, Lengths and Angles**: Each tool's number of flutes, flute length, overall length and taper angle come along. ncSender doesn't show them yet, but it keeps them for plugins to use, such as feeds and speeds by flute count, or a V-bit's angle
+- **Flutes, Lengths and Angles**: Each tool's number of flutes, flute length, overall length, corner radius and taper angle come along. ncSender doesn't show them yet, but it keeps them for plugins to use, such as feeds and speeds by flute count, or a V-bit's angle
+
+- **Bit Types**: Roundover bits come in as wide as they cut (not their tip), V-groove form mills as V-bits, and bowl, cove and tapered ball nose bits as ball end mills
 
 ![Tool Import Dialog](docs/screenshots/tool-import-dialog.png)
 *Tool import comparison*
