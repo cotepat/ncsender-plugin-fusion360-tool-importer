@@ -211,6 +211,59 @@ test('mergeTool handles a stored tool with no metadata', () => {
   assert.strictEqual(merged.metadata.notes, 'new note');
 });
 
+// ---------- Flutes and lengths ----------
+test('convertFusionTool reads the flutes and lengths, in mm', () => {
+  const tool = lib.convertFusionTool({
+    'post-process': { number: 3 },
+    geometry: { DC: 0.25, NOF: 2, LCF: 1, OAL: 2.5 },
+    unit: 'inches',
+    description: '1/4 upcut',
+    type: 'flat end mill'
+  }, { includeFusionToolNumber: false, preserveToolNumber: true });
+  assert.strictEqual(tool.metadata.flutes, 2);
+  assert.deepStrictEqual({ ...tool.dimensions }, { flute_length: 25.4, overall_length: 63.5 });
+});
+
+test('convertFusionTool leaves out flutes and lengths Fusion does not give', () => {
+  const tool = lib.convertFusionTool({
+    'post-process': { number: 3 },
+    geometry: { DC: 6, NOF: 0 },
+    unit: 'millimeters',
+    type: 'flat end mill'
+  }, { includeFusionToolNumber: false, preserveToolNumber: true });
+  assert.strictEqual(tool.metadata.flutes, undefined);
+  assert.strictEqual(tool.dimensions, undefined);
+});
+
+test('convertTSVTool reads the flutes and lengths', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\t' +
+    'Number of Flutes (tool_numberOfFlutes)\tFlute Length (tool_fluteLength)\tOverall Length (tool_overallLength)';
+  const [tool] = lib.parseTSVData([header, '1\t4\t6\tmillimeters\t1\t22\t50'].join('\n'), { preserveToolNumber: true });
+  assert.strictEqual(tool.metadata.flutes, 1);
+  assert.deepStrictEqual({ ...tool.dimensions }, { flute_length: 22, overall_length: 50 });
+});
+
+test('mergeTool takes the flutes and lengths and keeps the other dimensions', () => {
+  const stored = { ...storedTool(), dimensions: { flute_length: 10, stickout: 30 } };
+  const merged = lib.mergeTool(stored, {
+    ...importedTool(),
+    metadata: { notes: '', image: '', sku: '', flutes: 3 },
+    dimensions: { flute_length: 22, overall_length: 50 }
+  });
+  assert.strictEqual(merged.metadata.flutes, 3);
+  assert.strictEqual(merged.metadata.image, 'facemill.png');
+  assert.deepStrictEqual({ ...merged.dimensions }, { flute_length: 22, stickout: 30, overall_length: 50 });
+});
+
+test('computeComparison flags new flutes and lengths, not missing ones', () => {
+  const existing = [{ toolId: 4, name: 'Bit', type: 'flat', diameter: 6, metadata: { flutes: 2 }, dimensions: { flute_length: 22 } }];
+  const changed = [{ toolId: 4, name: 'Bit', type: 'flat', diameter: 6, metadata: { flutes: 3 }, dimensions: { flute_length: 22, overall_length: 50 } }];
+  const without = [{ toolId: 4, name: 'Bit', type: 'flat', diameter: 6, metadata: {} }];
+  const result = lib.computeComparison(existing, changed, { preserveToolNumber: true });
+  assert.deepStrictEqual([...result[0].changes], ['Flutes', 'Overall Length']);
+  assert.strictEqual(lib.computeComparison(existing, without, { preserveToolNumber: true })[0].status, 'unchanged');
+});
+
 test('planImport keeps tools that are not imported and adds new ones', () => {
   const other = { id: 3, toolId: 3, toolNumber: null, name: 'Other', type: 'flat', diameter: 6 };
   const added = { ...importedTool(), toolId: 200, toolNumber: null };

@@ -481,6 +481,29 @@
       });
     }
 
+    // Fusion's flute count and lengths (in mm). ncSender's tool editor doesn't show
+    // them but keeps them, and plugins can read them: the flutes for feeds and speeds.
+    function toolExtras(flutes, fluteLength, overallLength, toMm) {
+      const extras = {};
+      const count = parseInt(flutes, 10);
+      if (count > 0) extras.flutes = count;
+      const mm = (value) => {
+        const length = parseFloat(value);
+        return length > 0 ? Math.round(length * toMm * 100000) / 100000 : null;
+      };
+      const dimensions = {};
+      if (mm(fluteLength)) dimensions.flute_length = mm(fluteLength);
+      if (mm(overallLength)) dimensions.overall_length = mm(overallLength);
+      if (Object.keys(dimensions).length > 0) extras.dimensions = dimensions;
+      return extras;
+    }
+
+    function withExtras(tool, extras) {
+      if (extras.flutes) tool.metadata.flutes = extras.flutes;
+      if (extras.dimensions) tool.dimensions = extras.dimensions;
+      return tool;
+    }
+
     function parseTSVLine(line) {
       const values = [];
       let current = '';
@@ -591,8 +614,14 @@
 
       const comment = getValue('Comment (tool_comment)') || '';
       const productId = getValue('Product ID (tool_productId)') || '';
+      const extras = toolExtras(
+        getValue('Number of Flutes (tool_numberOfFlutes)'),
+        getValue('Flute Length (tool_fluteLength)'),
+        getValue('Overall Length (tool_overallLength)'),
+        unit.includes('inch') ? 25.4 : 1
+      );
 
-      return {
+      return withExtras({
         toolId: fusionToolNumber,
         toolNumber: toolNumber,
         name: description,
@@ -604,7 +633,7 @@
           image: '',
           sku: productId
         }
-      };
+      }, extras);
     }
 
     function parseTSVData(tsvText, settings) {
@@ -673,6 +702,8 @@
       if (unitStr.includes('inch')) {
         diameterInMm = diameter * 25.4;
       }
+      const geometry = fusionTool.geometry || {};
+      const extras = toolExtras(geometry.NOF, geometry.LCF, geometry.OAL, unitStr.includes('inch') ? 25.4 : 1);
 
       diameterInMm = Math.round(diameterInMm * 100000) / 100000;
 
@@ -696,7 +727,7 @@
         }
       }
 
-      return {
+      return withExtras({
         toolId: fusionToolNumber,
         toolNumber: toolNumber,
         name: description,
@@ -708,7 +739,7 @@
           image: '',
           sku: fusionTool['product-id'] || ''
         }
-      };
+      }, extras);
     }
 
     // Treat null/undefined/'' as equivalent so existing tools without a metadata field
@@ -733,6 +764,11 @@
       return { unique, duplicates };
     }
 
+    function lengthChanged(existing, newTool, key) {
+      const length = newTool.dimensions?.[key];
+      return length != null && Math.abs((existing.dimensions?.[key] || 0) - length) > 0.001;
+    }
+
     function computeComparison(existingTools, newTools, settings, duplicates = []) {
       const result = newTools.map(newTool => {
         const existing = existingTools.find(t => t.toolId === newTool.toolId);
@@ -746,6 +782,10 @@
           if (!settings.preserveToolNumber && nz(existing.toolNumber) !== nz(newTool.toolNumber)) changes.push('Slot');
           if (nz(existing.metadata?.notes) !== nz(newTool.metadata?.notes)) changes.push('Notes');
           if (nz(existing.metadata?.sku) !== nz(newTool.metadata?.sku)) changes.push('SKU');
+          // Only what Fusion gives: a tool without them keeps the library's values.
+          if (newTool.metadata?.flutes && existing.metadata?.flutes !== newTool.metadata.flutes) changes.push('Flutes');
+          if (lengthChanged(existing, newTool, 'flute_length')) changes.push('Flute Length');
+          if (lengthChanged(existing, newTool, 'overall_length')) changes.push('Overall Length');
 
           status = changes.length > 0 ? 'modified' : 'unchanged';
         }
@@ -805,9 +845,10 @@
     }
 
     // Fusion owns what it exports. Everything ncSender measures or stores on the
-    // tool (offsets, image, life, dimensions, specs) stays as it is.
+    // tool (offsets, image, life, specs, the other dimensions) stays as it is, and so
+    // do the flutes and lengths when Fusion doesn't give them.
     function mergeTool(existing, incoming) {
-      return {
+      const merged = {
         ...existing,
         toolNumber: incoming.toolNumber,
         name: incoming.name,
@@ -819,6 +860,9 @@
           sku: incoming.metadata.sku
         }
       };
+      if (incoming.metadata.flutes) merged.metadata.flutes = incoming.metadata.flutes;
+      if (incoming.dimensions) merged.dimensions = { ...existing.dimensions, ...incoming.dimensions };
+      return merged;
     }
 
     // The whole library as it will be saved (PUT /api/tools replaces everything),
