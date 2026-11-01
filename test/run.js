@@ -224,10 +224,21 @@ test('convertFusionTool reads the flutes and lengths, in mm', () => {
   assert.deepStrictEqual({ ...tool.dimensions }, { flute_length: 25.4, overall_length: 63.5 });
 });
 
+test('convertFusionTool reads a V-bit\'s taper angle', () => {
+  const tool = lib.convertFusionTool({
+    'post-process': { number: 9 },
+    geometry: { DC: 0.25, NOF: 4, TA: 30.00000000000001 },
+    unit: 'inches',
+    type: 'chamfer mill'
+  }, { includeFusionToolNumber: false, preserveToolNumber: true });
+  assert.strictEqual(tool.type, 'v-bit');
+  assert.strictEqual(tool.dimensions.taper_angle, 30);
+});
+
 test('convertFusionTool leaves out flutes and lengths Fusion does not give', () => {
   const tool = lib.convertFusionTool({
     'post-process': { number: 3 },
-    geometry: { DC: 6, NOF: 0 },
+    geometry: { DC: 6, NOF: 0, TA: 0 },
     unit: 'millimeters',
     type: 'flat end mill'
   }, { includeFusionToolNumber: false, preserveToolNumber: true });

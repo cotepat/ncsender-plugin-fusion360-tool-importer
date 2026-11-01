@@ -481,9 +481,10 @@
       });
     }
 
-    // Fusion's flute count and lengths (in mm). ncSender's tool editor doesn't show
-    // them but keeps them, and plugins can read them: the flutes for feeds and speeds.
-    function toolExtras(flutes, fluteLength, overallLength, toMm) {
+    // Fusion's flute count, lengths (in mm) and taper angle (in degrees from the
+    // axis: 45 for a 90° V-bit). ncSender's tool editor doesn't show them but keeps
+    // them, and plugins can read them: the flutes for feeds, the angle for V-bits.
+    function toolExtras(flutes, fluteLength, overallLength, taperAngle, toMm) {
       const extras = {};
       const count = parseInt(flutes, 10);
       if (count > 0) extras.flutes = count;
@@ -495,6 +496,8 @@
       const flute = mm(fluteLength), overall = mm(overallLength);
       if (flute) dimensions.flute_length = flute;
       if (overall) dimensions.overall_length = overall;
+      const angle = parseFloat(taperAngle);
+      if (angle > 0 && angle < 90) dimensions.taper_angle = Math.round(angle * 1000) / 1000;
       if (Object.keys(dimensions).length > 0) extras.dimensions = dimensions;
       return extras;
     }
@@ -619,6 +622,7 @@
         getValue('Number of Flutes (tool_numberOfFlutes)'),
         getValue('Flute Length (tool_fluteLength)'),
         getValue('Overall Length (tool_overallLength)'),
+        getValue('Taper Angle (tool_taperAngle)'),
         unit.includes('inch') ? 25.4 : 1
       );
 
@@ -704,7 +708,7 @@
         diameterInMm = diameter * 25.4;
       }
       const geometry = fusionTool.geometry || {};
-      const extras = toolExtras(geometry.NOF, geometry.LCF, geometry.OAL, unitStr.includes('inch') ? 25.4 : 1);
+      const extras = toolExtras(geometry.NOF, geometry.LCF, geometry.OAL, geometry.TA, unitStr.includes('inch') ? 25.4 : 1);
 
       diameterInMm = Math.round(diameterInMm * 100000) / 100000;
 
@@ -787,6 +791,7 @@
           if (newTool.metadata?.flutes && existing.metadata?.flutes !== newTool.metadata.flutes) changes.push('Flutes');
           if (lengthChanged(existing, newTool, 'flute_length')) changes.push('Flute Length');
           if (lengthChanged(existing, newTool, 'overall_length')) changes.push('Overall Length');
+          if (lengthChanged(existing, newTool, 'taper_angle')) changes.push('Taper Angle');
 
           status = changes.length > 0 ? 'modified' : 'unchanged';
         }
