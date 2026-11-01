@@ -507,13 +507,14 @@
 
     // Fusion types with no single ncSender match. A radius mill (roundover) cuts
     // DC + 2 RE across: DC is only its tip. A form mill whose profile is a straight
-    // line from the tip out to the full diameter is a V-bit. A tapered mill with no
-    // taper is a ball (round end: cove, bowl) or flat bit, and one with a round tip
-    // is a tapered ball nose, not a V-bit. `geometry` is in the tool's own units.
+    // line from the tip out to the full diameter is a V-bit. A tapered mill with a
+    // round tip is a ball (cove, bowl, tapered ball nose), and one Fusion gives a
+    // taper of 0 is flat; without a taper given it stays a V-bit. A dovetail's angle
+    // isn't a V's, so it isn't kept. `geometry` is in the tool's own units.
     function toolShape(fusionType, geometry) {
       const type = (fusionType || '').toLowerCase();
       const radius = geometry.RE > 0 ? geometry.RE : 0;
-      const taper = geometry.TA > 0 ? geometry.TA : 0;
+      const taper = geometry.TA > 0 && type !== 'dovetail mill' ? geometry.TA : 0;
       if (type === 'radius mill') {
         return { type: 'flat', diameter: geometry.DC + 2 * radius, taperAngle: taper };
       }
@@ -521,21 +522,25 @@
         const vAngle = straightVAngle(geometry.profile, geometry.DC);
         if (vAngle) return { type: 'v-bit', diameter: geometry.DC, taperAngle: vAngle };
       }
-      if (type === 'tapered mill' && (radius > 0 || !taper)) {
+      if (type === 'tapered mill' && (radius > 0 || geometry.TA === 0)) {
         return { type: radius > 0 ? 'ball' : 'flat', diameter: geometry.DC, taperAngle: taper };
       }
       return { type: TYPE_MAPPING[type] || 'flat', diameter: geometry.DC, taperAngle: taper };
     }
 
     // The half angle of a form mill's profile when it starts with a straight
-    // line from the tip (0, 0) out to the full radius, or null.
+    // line from the tip (0, 0) out to the full radius, or null. A segment with
+    // anything but its end point (an arc's center or direction) isn't straight,
+    // and an angle near flat isn't a V.
     function straightVAngle(profile, diameter) {
       if (!Array.isArray(profile) || profile.length < 2) return null;
-      const start = profile[0].end || [], edge = profile[1];
+      const start = profile[0]?.end || [], edge = profile[1];
+      if (!edge || Object.keys(edge).some(key => key !== 'end')) return null;
       const [x, y] = edge.end || [];
-      if (start[0] !== 0 || start[1] !== 0 || edge.center || !(x > 0) || !(y > 0)) return null;
+      if (start[0] !== 0 || start[1] !== 0 || !(x > 0) || !(y > 0)) return null;
       if (Math.abs(x - diameter / 2) > diameter * 0.01) return null;
-      return Math.round(Math.atan2(x, y) * 180 / Math.PI * 1000) / 1000;
+      const angle = Math.round(Math.atan2(x, y) * 180 / Math.PI * 1000) / 1000;
+      return angle < 80 ? angle : null;
     }
 
     function withExtras(tool, extras) {

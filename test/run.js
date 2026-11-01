@@ -271,6 +271,43 @@ test('a tapered mill is a V-bit only when it tapers to a point', () => {
   assert.strictEqual(cove.dimensions.radius, 9.525);
 });
 
+test('a tapered mill with no taper given stays a V-bit; a dovetail keeps no taper angle', () => {
+  assert.strictEqual(fusionTool('tapered mill', { DC: 0.25 }).type, 'v-bit');
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)';
+  const [pasted] = lib.parseTSVData([header, '1\t9\t6\tmillimeters\ttapered mill'].join('\n'), { preserveToolNumber: true });
+  assert.strictEqual(pasted.type, 'v-bit');
+  assert.strictEqual(fusionTool('dovetail mill', { DC: 0.5, TA: 14 }).dimensions, undefined);
+});
+
+test('odd form mill profiles stay flat instead of failing the import', () => {
+  const v = (segment) => fusionTool('form mill', { DC: 6, profile: [{ end: [0, 0] }, segment] }, 'millimeters').type;
+  assert.strictEqual(v({ end: [3, 5], ccw: true }), 'flat');
+  assert.strictEqual(v({ end: [3, 0.001] }), 'flat');
+  assert.strictEqual(v({ end: [3, 5] }), 'v-bit');
+  assert.strictEqual(fusionTool('form mill', { DC: 6, profile: [null, { end: [3, 1] }] }, 'millimeters').type, 'flat');
+  assert.strictEqual(fusionTool('form mill', { DC: 6, profile: [{ end: [0, 0] }, null] }, 'millimeters').type, 'flat');
+});
+
+test('a re-import that changes a tool\'s type keeps its slot and its other dimensions', () => {
+  const stored = { ...storedTool(), type: 'v-bit', toolNumber: 4, dimensions: { stickout: 30, flute_length: null } };
+  const incoming = { ...importedTool(), type: 'ball', toolNumber: null, dimensions: { radius: 9.525 } };
+  const [row] = lib.computeComparison([stored], [incoming], { preserveToolNumber: true });
+  assert.ok(row.changes.includes('Type') && row.changes.includes('Corner Radius'));
+  const preserved = lib.applyPreservedSlots([incoming], [stored], { preserveToolNumber: true });
+  const { library } = lib.planImport([stored], preserved, { magazineSize: 8, probeSlot: null });
+  assert.strictEqual(library[0].type, 'ball');
+  assert.strictEqual(library[0].toolNumber, 4);
+  assert.deepStrictEqual({ ...library[0].dimensions }, { stickout: 30, flute_length: null, radius: 9.525 });
+});
+
+test('a pasted roundover in inches, and one with a blank Corner Radius', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)\tCorner Radius (tool_cornerRadius)';
+  const [inch, blank] = lib.parseTSVData([header, '1\t30\t0.007874\tinches\tradius mill\t0.25', '2\t31\t0.2\tmillimeters\tradius mill\t'].join('\n'), { preserveToolNumber: true });
+  assert.ok(Math.abs(inch.diameter - 12.9) < 0.001, String(inch.diameter));
+  assert.strictEqual(inch.dimensions.radius, 6.35);
+  assert.strictEqual(blank.diameter, 0.2);
+});
+
 test('the paste path widens a roundover by its Corner Radius too', () => {
   const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)\tCorner Radius (tool_cornerRadius)';
   const [tool] = lib.parseTSVData([header, '1\t30\t0.2\tmillimeters\tradius mill\t6.35'].join('\n'), { preserveToolNumber: true });
