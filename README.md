@@ -29,7 +29,7 @@ This plugin allows you to:
 
 ## 🚀 Installation
 
-1. **Download** the latest release: [`com.ncsender.fusion360-import-v3.0.4.zip`](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/releases/latest)
+1. **Download** the latest release: [`com.ncsender.fusion360-import-v3.1.0.zip`](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/releases/latest)
 2. **Open ncSender** → Navigate to settings (gear icon), then **Plugins** tab
 3. **Click** "Install Plugin" button
 4. **Select** the downloaded zip file
@@ -80,5 +80,5 @@ The plugin will appear in **Plugins → Fusion 360 Tool Importer** menu.
 
 ---
 
-**Version**: 3.0.4
+**Version**: 3.1.0
 **Repository**: [github.com/cotepat/ncsender-plugin-fusion360-tool-importer](https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer)

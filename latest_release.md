@@ -12,7 +12,7 @@ Each tool's **number of flutes**, **flute length**, **overall length** and **tap
 ### 🛠️ Bits filed under the right type
 - **Roundover bits** (Fusion's *radius mill*) used to come in as 0.2 mm flat end mills, because Fusion's diameter for them is only the tip. They now come in as wide as they cut (tip + 2 × radius), with the radius kept.
 - **Form mills** whose profile is a straight V from the tip (a V-groove bit drawn as a form mill) now come in as V-bits, with their angle. This needs a JSON export: a paste has no profile, so there they stay flat end mills.
-- **Tapered mills** without a point now come in as ball end mills (bowl, cove, tapered ball nose: a round end), or as flat end mills when Fusion gives no taper and no radius, instead of V-bits. Their taper angle is kept.
+- **Tapered mills** without a point now come in as ball end mills (bowl, cove, tapered ball nose: a round end), or as flat end mills when Fusion gives a taper of 0 and no radius, instead of V-bits. Their taper angle is kept.
 - Each tool's **corner radius** comes along too.
 
 To add them to the tools you already have, import your library once more and click **Import All**: the preview shows those tools as MODIFIED, and **Import New** skips them.

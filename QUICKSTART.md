@@ -49,8 +49,8 @@ git commit -m "Description of changes"
 git push
 
 # Create a release tag (triggers automated release — must match manifest.json version)
-git tag -a v3.0.1 -m "Release v3.0.1"
-git push origin v3.0.1
+git tag -a v3.1.0 -m "Release v3.1.0"
+git push origin v3.1.0
 ```
 
 The GitHub Action will automatically:
