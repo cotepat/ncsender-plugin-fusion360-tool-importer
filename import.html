@@ -481,6 +481,74 @@
       });
     }
 
+    // Fusion's flute count, lengths and corner radius (in mm) and taper angle (in
+    // degrees from the axis: 45 for a 90° V-bit). ncSender's tool editor doesn't show
+    // them but keeps them, and plugins can read them: the flutes for feeds, the angle
+    // for V-bits.
+    function toolExtras(flutes, fluteLength, overallLength, taperAngle, cornerRadius, toMm) {
+      const extras = {};
+      const count = parseInt(flutes, 10);
+      if (count > 0) extras.flutes = count;
+      const mm = (value) => {
+        const length = parseFloat(value);
+        return length > 0 ? Math.round(length * toMm * 100000) / 100000 : null;
+      };
+      const dimensions = {};
+      const flute = mm(fluteLength), overall = mm(overallLength);
+      if (flute) dimensions.flute_length = flute;
+      if (overall) dimensions.overall_length = overall;
+      const angle = parseFloat(taperAngle);
+      if (angle > 0 && angle < 90) dimensions.taper_angle = Math.round(angle * 1000) / 1000;
+      const radius = mm(cornerRadius);
+      if (radius) dimensions.radius = radius;
+      if (Object.keys(dimensions).length > 0) extras.dimensions = dimensions;
+      return extras;
+    }
+
+    // Fusion types with no single ncSender match. A radius mill (roundover) cuts
+    // DC + 2 RE across: DC is only its tip. A form mill whose profile is a straight
+    // line from the tip out to the full diameter is a V-bit. A tapered mill with a
+    // round tip is a ball (cove, bowl, tapered ball nose), and one Fusion gives a
+    // taper of 0 is flat; without a taper given it stays a V-bit. A dovetail's angle
+    // isn't a V's, so it isn't kept. `geometry` is in the tool's own units.
+    function toolShape(fusionType, geometry) {
+      const type = (fusionType || '').toLowerCase();
+      const radius = geometry.RE > 0 ? geometry.RE : 0;
+      const taper = geometry.TA > 0 && type !== 'dovetail mill' ? geometry.TA : 0;
+      if (type === 'radius mill') {
+        return { type: 'flat', diameter: geometry.DC + 2 * radius, taperAngle: taper };
+      }
+      if (type === 'form mill') {
+        const vAngle = straightVAngle(geometry.profile, geometry.DC);
+        if (vAngle) return { type: 'v-bit', diameter: geometry.DC, taperAngle: vAngle };
+      }
+      if (type === 'tapered mill' && (radius > 0 || geometry.TA === 0)) {
+        return { type: radius > 0 ? 'ball' : 'flat', diameter: geometry.DC, taperAngle: taper };
+      }
+      return { type: TYPE_MAPPING[type] || 'flat', diameter: geometry.DC, taperAngle: taper };
+    }
+
+    // The half angle of a form mill's profile when it starts with a straight
+    // line from the tip (0, 0) out to the full radius, or null. A segment with
+    // anything but its end point (an arc's center or direction) isn't straight,
+    // and an angle near flat isn't a V.
+    function straightVAngle(profile, diameter) {
+      if (!Array.isArray(profile) || profile.length < 2) return null;
+      const start = profile[0]?.end || [], edge = profile[1];
+      if (!edge || Object.keys(edge).some(key => key !== 'end')) return null;
+      const [x, y] = edge.end || [];
+      if (start[0] !== 0 || start[1] !== 0 || !(x > 0) || !(y > 0)) return null;
+      if (Math.abs(x - diameter / 2) > diameter * 0.01) return null;
+      const angle = Math.round(Math.atan2(x, y) * 180 / Math.PI * 1000) / 1000;
+      return angle < 80 ? angle : null;
+    }
+
+    function withExtras(tool, extras) {
+      if (extras.flutes) tool.metadata.flutes = extras.flutes;
+      if (extras.dimensions) tool.dimensions = extras.dimensions;
+      return tool;
+    }
+
     function parseTSVLine(line) {
       const values = [];
       let current = '';
@@ -551,23 +619,28 @@
       }
 
       const diameterStr = getValue('Diameter (tool_diameter)');
-      const diameter = parseFloat(diameterStr);
-      if (isNaN(diameter) || diameter <= 0) {
+      const tipDiameter = parseFloat(diameterStr);
+      if (isNaN(tipDiameter) || tipDiameter <= 0) {
         throw new Error(`Invalid diameter: ${diameterStr}`);
       }
 
       const unitStr = getValue('Unit (tool_unit)') || '';
       const unit = unitStr.toLowerCase().trim();
 
-      let diameterInMm = diameter;
+      const toolType = getValue('Type (tool_type)') || '';
+      const shape = toolShape(toolType, {
+        DC: tipDiameter,
+        RE: parseFloat(getValue('Corner Radius (tool_cornerRadius)')),
+        TA: parseFloat(getValue('Taper Angle (tool_taperAngle)'))
+      });
+      const ncSenderType = shape.type;
+
+      let diameterInMm = shape.diameter;
       if (unit.includes('inch')) {
-        diameterInMm = diameter * 25.4;
+        diameterInMm = shape.diameter * 25.4;
       }
 
       diameterInMm = Math.round(diameterInMm * 100000) / 100000;
-
-      const toolType = getValue('Type (tool_type)') || '';
-      const ncSenderType = TYPE_MAPPING[toolType.toLowerCase()] || 'flat';
 
       let description = getValue('Description (tool_description)') || '';
       if (!description || description.trim() === '') {
@@ -591,8 +664,16 @@
 
       const comment = getValue('Comment (tool_comment)') || '';
       const productId = getValue('Product ID (tool_productId)') || '';
+      const extras = toolExtras(
+        getValue('Number of Flutes (tool_numberOfFlutes)'),
+        getValue('Flute Length (tool_fluteLength)'),
+        getValue('Overall Length (tool_overallLength)'),
+        shape.taperAngle,
+        getValue('Corner Radius (tool_cornerRadius)'),
+        unit.includes('inch') ? 25.4 : 1
+      );
 
-      return {
+      return withExtras({
         toolId: fusionToolNumber,
         toolNumber: toolNumber,
         name: description,
@@ -604,7 +685,7 @@
           image: '',
           sku: productId
         }
-      };
+      }, extras);
     }
 
     function parseTSVData(tsvText, settings) {
@@ -650,29 +731,29 @@
         throw new Error('Tool missing Fusion 360 tool number');
       }
 
-      const fusionType = fusionTool.type?.toLowerCase() || '';
-      const ncSenderType = TYPE_MAPPING[fusionType] || 'flat';
-
       let toolNumber = null;
       if (!settings.preserveToolNumber) {
         const turret = Number(fusionTool['post-process']?.turret);
         toolNumber = Number.isInteger(turret) && turret > 0 ? turret : null;
       }
 
-      const diameter = fusionTool.geometry?.DC || 0;
-      if (diameter <= 0) {
-        throw new Error(`Invalid diameter: ${diameter}`);
+      const geometry = fusionTool.geometry || {};
+      if (!(geometry.DC > 0)) {
+        throw new Error(`Invalid diameter: ${geometry.DC || 0}`);
       }
+      const shape = toolShape(fusionTool.type, geometry);
+      const ncSenderType = shape.type;
 
       const toolUnitFromExpressions = fusionTool.expressions?.tool_unit || '';
       const toolUnitFromRoot = fusionTool.unit || '';
       const toolUnit = toolUnitFromExpressions || toolUnitFromRoot;
 
-      let diameterInMm = diameter;
+      let diameterInMm = shape.diameter;
       const unitStr = toolUnit.replace(/['"]/g, '').toLowerCase().trim();
       if (unitStr.includes('inch')) {
-        diameterInMm = diameter * 25.4;
+        diameterInMm = shape.diameter * 25.4;
       }
+      const extras = toolExtras(geometry.NOF, geometry.LCF, geometry.OAL, shape.taperAngle, geometry.RE, unitStr.includes('inch') ? 25.4 : 1);
 
       diameterInMm = Math.round(diameterInMm * 100000) / 100000;
 
@@ -696,7 +777,7 @@
         }
       }
 
-      return {
+      return withExtras({
         toolId: fusionToolNumber,
         toolNumber: toolNumber,
         name: description,
@@ -708,7 +789,7 @@
           image: '',
           sku: fusionTool['product-id'] || ''
         }
-      };
+      }, extras);
     }
 
     // Treat null/undefined/'' as equivalent so existing tools without a metadata field
@@ -733,6 +814,11 @@
       return { unique, duplicates };
     }
 
+    function lengthChanged(existing, newTool, key) {
+      const length = newTool.dimensions?.[key];
+      return length != null && Math.abs((existing.dimensions?.[key] || 0) - length) > 0.001;
+    }
+
     function computeComparison(existingTools, newTools, settings, duplicates = []) {
       const result = newTools.map(newTool => {
         const existing = existingTools.find(t => t.toolId === newTool.toolId);
@@ -746,6 +832,12 @@
           if (!settings.preserveToolNumber && nz(existing.toolNumber) !== nz(newTool.toolNumber)) changes.push('Slot');
           if (nz(existing.metadata?.notes) !== nz(newTool.metadata?.notes)) changes.push('Notes');
           if (nz(existing.metadata?.sku) !== nz(newTool.metadata?.sku)) changes.push('SKU');
+          // Only what Fusion gives: a tool without them keeps the library's values.
+          if (newTool.metadata?.flutes && existing.metadata?.flutes !== newTool.metadata.flutes) changes.push('Flutes');
+          if (lengthChanged(existing, newTool, 'flute_length')) changes.push('Flute Length');
+          if (lengthChanged(existing, newTool, 'overall_length')) changes.push('Overall Length');
+          if (lengthChanged(existing, newTool, 'taper_angle')) changes.push('Taper Angle');
+          if (lengthChanged(existing, newTool, 'radius')) changes.push('Corner Radius');
 
           status = changes.length > 0 ? 'modified' : 'unchanged';
         }
@@ -805,9 +897,10 @@
     }
 
     // Fusion owns what it exports. Everything ncSender measures or stores on the
-    // tool (offsets, image, life, dimensions, specs) stays as it is.
+    // tool (offsets, image, life, specs, the other dimensions) stays as it is, and so
+    // do the flutes and lengths when Fusion doesn't give them.
     function mergeTool(existing, incoming) {
-      return {
+      const merged = {
         ...existing,
         toolNumber: incoming.toolNumber,
         name: incoming.name,
@@ -819,6 +912,9 @@
           sku: incoming.metadata.sku
         }
       };
+      if (incoming.metadata.flutes) merged.metadata.flutes = incoming.metadata.flutes;
+      if (incoming.dimensions) merged.dimensions = { ...existing.dimensions, ...incoming.dimensions };
+      return merged;
     }
 
     // The whole library as it will be saved (PUT /api/tools replaces everything),

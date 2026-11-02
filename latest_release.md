@@ -1,30 +1,21 @@
-# Fusion 360 Tool Library Import v3.0.4
-
-## ⚠️ Before You Update
-
-- **ncSender 2.0.173 or newer is now required.** ncSender refuses the update on older versions, so update ncSender first.
-- **"Do not overwrite ncSender Slot number" now has a clear meaning.** Checked (the default), an import never changes a slot. Unchecked, Fusion 360 turret numbers replace slots, so a tool can take a slot from another tool. Check this setting before your next import.
+# Fusion 360 Tool Library Import v3.1.0
 
 ## What's New
 
-### 🔧 Turret numbers can replace slots
-With "Do not overwrite" unchecked:
-- A tool whose turret number points to an occupied slot takes it. The tool that was there ends up with no slot but keeps everything else.
-- A tool with no turret number (blank or 0) keeps its slot. To free a slot, use the Tool Library.
-- Tools can swap or move slots in one import.
-- The import stops if a turret number is past your magazine, or if Fusion 360 gives two tools the same turret number. The table shows why.
-- The preview lists every tool that will lose its slot, including tools that aren't in your Fusion 360 file.
+### 🔩 Flutes, lengths and taper angles are imported
+Each tool's **number of flutes**, **flute length**, **overall length** and **taper angle** (45° for a 90° V-bit) now come over from Fusion 360, from a JSON file or a paste.
+- ncSender's Tool Library doesn't show them yet, but it keeps them with the tool. Plugins can use them: for example, to work out feeds and speeds from the flute count, or a V-bit's angle for a chamfer, instead of guessing from the tool's name.
+- Lengths are saved in mm, whatever units the Fusion 360 library uses.
+- Re-importing updates them, and the preview lists them as changes (**Flutes**, **Flute Length**, **Overall Length**, **Taper Angle**, **Corner Radius**).
+- A tool that Fusion 360 gives no value for keeps what ncSender already has. So does a value you clear in Fusion 360: an import adds and updates these, it never removes them. Other stored data (offsets, image, life, stickout and the rest) is kept, as before.
 
-### 🐛 Fixes
-- **Stored tool data is kept.** Re-importing a tool used to reset its tool length and TLS offsets and drop its image, life, dimensions and specs. Now only what Fusion 360 exports is updated: name, type, diameter, notes and SKU.
-- **Your library can't be lost to a failed read.** The importer reads the library again right before saving and stops if it can't, rather than saving over it.
-- **Duplicate Fusion 360 tool numbers are shown.** They used to be dropped silently. The first tool is kept and the others are listed as `duplicate`. JSON imports used to keep the last one, so that behavior changes.
-- **No more false MODIFIED.** Tools with no notes or SKU in ncSender no longer show as modified when nothing changed.
-- Tool names can no longer inject HTML into the dialog, and the tool number prefix is no longer added twice.
-- The dialog no longer clashes with other plugins' dialogs or errors when reopened.
+### 🛠️ Bits filed under the right type
+- **Roundover bits** (Fusion's *radius mill*) used to come in as 0.2 mm flat end mills, because Fusion's diameter for them is only the tip. They now come in as wide as they cut (tip + 2 × radius), with the radius kept.
+- **Form mills** whose profile is a straight V from the tip (a V-groove bit drawn as a form mill) now come in as V-bits, with their angle. This needs a JSON export: a paste has no profile, so there they stay flat end mills.
+- **Tapered mills** without a point now come in as ball end mills (bowl, cove, tapered ball nose: a round end), or as flat end mills when Fusion gives no taper and no radius, instead of V-bits. Their taper angle is kept.
+- Each tool's **corner radius** comes along too.
 
-### ℹ️ Tool numbering note
-The dialog now shows which Tool Numbering mode ncSender is using (Slot or Tool ID), since that decides what `M6 T5` loads.
+To add them to the tools you already have, import your library once more and click **Import All**: the preview shows those tools as MODIFIED, and **Import New** skips them.
 
 ## ⚙️ Requirements
 
@@ -33,4 +24,4 @@ The dialog now shows which Tool Numbering mode ncSender is using (Slot or Tool I
 
 ---
 
-**Full Changelog**: https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/compare/v3.0.0...v3.0.4
+**Full Changelog**: https://github.com/cotepat/ncsender-plugin-fusion360-tool-importer/compare/v3.0.4...v3.1.0

@@ -211,6 +211,174 @@ test('mergeTool handles a stored tool with no metadata', () => {
   assert.strictEqual(merged.metadata.notes, 'new note');
 });
 
+// ---------- Flutes and lengths ----------
+test('convertFusionTool reads the flutes and lengths, in mm', () => {
+  const tool = lib.convertFusionTool({
+    'post-process': { number: 3 },
+    geometry: { DC: 0.25, NOF: 2, LCF: 1, OAL: 2.5 },
+    unit: 'inches',
+    description: '1/4 upcut',
+    type: 'flat end mill'
+  }, { includeFusionToolNumber: false, preserveToolNumber: true });
+  assert.strictEqual(tool.metadata.flutes, 2);
+  assert.deepStrictEqual({ ...tool.dimensions }, { flute_length: 25.4, overall_length: 63.5 });
+});
+
+test('convertFusionTool reads a V-bit\'s taper angle', () => {
+  const tool = lib.convertFusionTool({
+    'post-process': { number: 9 },
+    geometry: { DC: 0.25, NOF: 4, TA: 30.00000000000001 },
+    unit: 'inches',
+    type: 'chamfer mill'
+  }, { includeFusionToolNumber: false, preserveToolNumber: true });
+  assert.strictEqual(tool.type, 'v-bit');
+  assert.strictEqual(tool.dimensions.taper_angle, 30);
+});
+
+// ---------- Fusion types with no single ncSender match ----------
+const fusionTool = (type, geometry, unit = 'inches') => lib.convertFusionTool(
+  { 'post-process': { number: 1 }, type, unit, geometry, description: type },
+  { includeFusionToolNumber: false, preserveToolNumber: true });
+
+test('a roundover (radius mill) is as wide as it cuts, not its tip', () => {
+  const tool = fusionTool('radius mill', { DC: 0.007874015748031, RE: 0.25, NOF: 2 });
+  assert.strictEqual(tool.type, 'flat');
+  assert.ok(Math.abs(tool.diameter - 12.9) < 0.001, String(tool.diameter));
+  assert.strictEqual(tool.dimensions.radius, 6.35);
+});
+
+test('a form mill with a straight V profile is a V-bit with its angle', () => {
+  const profile = [{ end: [0, 0] }, { end: [0.125, 0.21650635094611] }, { end: [0.125, 2] }, { end: [0, 2] }];
+  const tool = fusionTool('form mill', { DC: 0.25, NOF: 3, profile });
+  assert.strictEqual(tool.type, 'v-bit');
+  assert.strictEqual(tool.dimensions.taper_angle, 30);
+  // A profile that starts with an arc, or doesn't reach the full width, stays flat.
+  const arc = fusionTool('form mill', { DC: 0.25, profile: [{ end: [0, 0] }, { end: [0.125, 0.2], center: [0, 0.2] }] });
+  const short = fusionTool('form mill', { DC: 0.25, profile: [{ end: [0, 0] }, { end: [0.05, 0.2] }, { end: [0.125, 0.3] }] });
+  assert.strictEqual(arc.type, 'flat');
+  assert.strictEqual(short.type, 'flat');
+  assert.strictEqual(fusionTool('form mill', { DC: 0.25 }).type, 'flat');
+});
+
+test('a tapered mill is a V-bit only when it tapers to a point', () => {
+  const cove = fusionTool('tapered mill', { DC: 0.75, RE: 0.375, TA: 0 });
+  const bowl = fusionTool('tapered mill', { DC: 0.75, RE: 0.25, TA: 0 });
+  const taperedBall = fusionTool('tapered mill', { DC: 0.0625, RE: 0.03125, TA: 5.38 });
+  const straight = fusionTool('tapered mill', { DC: 0.25, TA: 0 });
+  const pointed = fusionTool('tapered mill', { DC: 0.25, TA: 15 });
+  assert.deepStrictEqual([cove.type, bowl.type, taperedBall.type, straight.type, pointed.type], ['ball', 'ball', 'ball', 'flat', 'v-bit']);
+  assert.strictEqual(taperedBall.dimensions.taper_angle, 5.38);
+  assert.strictEqual(cove.dimensions.radius, 9.525);
+});
+
+test('a tapered mill with no taper given stays a V-bit; a dovetail keeps no taper angle', () => {
+  assert.strictEqual(fusionTool('tapered mill', { DC: 0.25 }).type, 'v-bit');
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)';
+  const [pasted] = lib.parseTSVData([header, '1\t9\t6\tmillimeters\ttapered mill'].join('\n'), { preserveToolNumber: true });
+  assert.strictEqual(pasted.type, 'v-bit');
+  assert.strictEqual(fusionTool('dovetail mill', { DC: 0.5, TA: 14 }).dimensions, undefined);
+});
+
+test('odd form mill profiles stay flat instead of failing the import', () => {
+  const v = (segment) => fusionTool('form mill', { DC: 6, profile: [{ end: [0, 0] }, segment] }, 'millimeters').type;
+  assert.strictEqual(v({ end: [3, 5], ccw: true }), 'flat');
+  assert.strictEqual(v({ end: [3, 0.001] }), 'flat');
+  assert.strictEqual(v({ end: [3, 5] }), 'v-bit');
+  assert.strictEqual(fusionTool('form mill', { DC: 6, profile: [null, { end: [3, 1] }] }, 'millimeters').type, 'flat');
+  assert.strictEqual(fusionTool('form mill', { DC: 6, profile: [{ end: [0, 0] }, null] }, 'millimeters').type, 'flat');
+});
+
+test('a re-import that changes a tool\'s type keeps its slot and its other dimensions', () => {
+  const stored = { ...storedTool(), type: 'v-bit', toolNumber: 4, dimensions: { stickout: 30, flute_length: null } };
+  const incoming = { ...importedTool(), type: 'ball', toolNumber: null, dimensions: { radius: 9.525 } };
+  const [row] = lib.computeComparison([stored], [incoming], { preserveToolNumber: true });
+  assert.ok(row.changes.includes('Type') && row.changes.includes('Corner Radius'));
+  const preserved = lib.applyPreservedSlots([incoming], [stored], { preserveToolNumber: true });
+  const { library } = lib.planImport([stored], preserved, { magazineSize: 8, probeSlot: null });
+  assert.strictEqual(library[0].type, 'ball');
+  assert.strictEqual(library[0].toolNumber, 4);
+  assert.deepStrictEqual({ ...library[0].dimensions }, { stickout: 30, flute_length: null, radius: 9.525 });
+});
+
+test('a pasted roundover in inches, and one with a blank Corner Radius', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)\tCorner Radius (tool_cornerRadius)';
+  const [inch, blank] = lib.parseTSVData([header, '1\t30\t0.007874\tinches\tradius mill\t0.25', '2\t31\t0.2\tmillimeters\tradius mill\t'].join('\n'), { preserveToolNumber: true });
+  assert.ok(Math.abs(inch.diameter - 12.9) < 0.001, String(inch.diameter));
+  assert.strictEqual(inch.dimensions.radius, 6.35);
+  assert.strictEqual(blank.diameter, 0.2);
+});
+
+test('the paste path widens a roundover by its Corner Radius too', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)\tCorner Radius (tool_cornerRadius)';
+  const [tool] = lib.parseTSVData([header, '1\t30\t0.2\tmillimeters\tradius mill\t6.35'].join('\n'), { preserveToolNumber: true });
+  assert.strictEqual(tool.type, 'flat');
+  assert.strictEqual(tool.diameter, 12.9);
+  assert.strictEqual(tool.dimensions.radius, 6.35);
+});
+
+test('convertFusionTool leaves out flutes and lengths Fusion does not give', () => {
+  const tool = lib.convertFusionTool({
+    'post-process': { number: 3 },
+    geometry: { DC: 6, NOF: 0, TA: 0 },
+    unit: 'millimeters',
+    type: 'flat end mill'
+  }, { includeFusionToolNumber: false, preserveToolNumber: true });
+  assert.strictEqual(tool.metadata.flutes, undefined);
+  assert.strictEqual(tool.dimensions, undefined);
+});
+
+test('convertTSVTool reads the flutes and lengths', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\t' +
+    'Number of Flutes (tool_numberOfFlutes)\tFlute Length (tool_fluteLength)\tOverall Length (tool_overallLength)';
+  const [tool] = lib.parseTSVData([header, '1\t4\t6\tmillimeters\t1\t22\t50'].join('\n'), { preserveToolNumber: true });
+  assert.strictEqual(tool.metadata.flutes, 1);
+  assert.deepStrictEqual({ ...tool.dimensions }, { flute_length: 22, overall_length: 50 });
+});
+
+test('convertTSVTool converts inch lengths and drops blank, bad or negative values', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\t' +
+    'Number of Flutes (tool_numberOfFlutes)\tFlute Length (tool_fluteLength)\tOverall Length (tool_overallLength)';
+  const [inch, bad] = lib.parseTSVData([header, '1\t4\t0.25\tinches\t2\t1\t2.5', '2\t5\t6\tmillimeters\t\tabc\t-1'].join('\n'), { preserveToolNumber: true });
+  assert.strictEqual(inch.metadata.flutes, 2);
+  assert.deepStrictEqual({ ...inch.dimensions }, { flute_length: 25.4, overall_length: 63.5 });
+  assert.strictEqual(bad.metadata.flutes, undefined);
+  assert.strictEqual(bad.dimensions, undefined);
+});
+
+test('mergeTool takes the flutes and lengths and keeps the other dimensions', () => {
+  const stored = { ...storedTool(), dimensions: { flute_length: 10, stickout: 30 } };
+  const merged = lib.mergeTool(stored, {
+    ...importedTool(),
+    metadata: { notes: '', image: '', sku: '', flutes: 3 },
+    dimensions: { flute_length: 22, overall_length: 50 }
+  });
+  assert.strictEqual(merged.metadata.flutes, 3);
+  assert.strictEqual(merged.metadata.image, 'facemill.png');
+  assert.deepStrictEqual({ ...merged.dimensions }, { flute_length: 22, stickout: 30, overall_length: 50 });
+});
+
+test('computeComparison flags new flutes and lengths, not missing ones', () => {
+  const existing = [{ toolId: 4, name: 'Bit', type: 'flat', diameter: 6, metadata: { flutes: 2 }, dimensions: { flute_length: 22 } }];
+  const changed = [{ toolId: 4, name: 'Bit', type: 'flat', diameter: 6, metadata: { flutes: 3 }, dimensions: { flute_length: 22, overall_length: 50 } }];
+  const without = [{ toolId: 4, name: 'Bit', type: 'flat', diameter: 6, metadata: {} }];
+  const result = lib.computeComparison(existing, changed, { preserveToolNumber: true });
+  assert.deepStrictEqual([...result[0].changes], ['Flutes', 'Overall Length']);
+  assert.strictEqual(lib.computeComparison(existing, without, { preserveToolNumber: true })[0].status, 'unchanged');
+});
+
+test('planImport saves the flutes and lengths over ncSender\'s stored dimensions', () => {
+  // ncSender's GET /api/tools sends every dimension, the unset ones as null.
+  const stored = { ...storedTool(), metadata: { notes: '', image: '', sku: '' },
+    dimensions: { flute_length: null, overall_length: null, taper_angle: null, radius: null, stickout: 5 } };
+  const incoming = { ...importedTool(), metadata: { notes: '', image: '', sku: '', flutes: 2 }, dimensions: { flute_length: 22 } };
+  assert.deepStrictEqual([...lib.computeComparison([stored], [incoming], { preserveToolNumber: true })[0].changes],
+    ['Description', 'Type', 'Diameter', 'Flutes', 'Flute Length']);
+  const { library } = lib.planImport([stored], [incoming], { magazineSize: 8, probeSlot: null });
+  assert.strictEqual(library[0].metadata.flutes, 2);
+  assert.deepStrictEqual({ ...library[0].dimensions },
+    { flute_length: 22, overall_length: null, taper_angle: null, radius: null, stickout: 5 });
+});
+
 test('planImport keeps tools that are not imported and adds new ones', () => {
   const other = { id: 3, toolId: 3, toolNumber: null, name: 'Other', type: 'flat', diameter: 6 };
   const added = { ...importedTool(), toolId: 200, toolNumber: null };
