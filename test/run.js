@@ -236,9 +236,9 @@ test('convertFusionTool reads a V-bit\'s taper angle', () => {
 });
 
 // ---------- Fusion types with no single ncSender match ----------
-const fusionTool = (type, geometry, unit = 'inches') => lib.convertFusionTool(
+const fusionTool = (type, geometry, unit = 'inches', server) => lib.convertFusionTool(
   { 'post-process': { number: 1 }, type, unit, geometry, description: type },
-  { includeFusionToolNumber: false, preserveToolNumber: true });
+  { includeFusionToolNumber: false, preserveToolNumber: true }, server);
 
 test('a roundover (radius mill) is as wide as it cuts, not its tip', () => {
   const tool = fusionTool('radius mill', { DC: 0.007874015748031, RE: 0.25, NOF: 2 });
@@ -266,9 +266,89 @@ test('a tapered mill is a V-bit only when it tapers to a point', () => {
   const taperedBall = fusionTool('tapered mill', { DC: 0.0625, RE: 0.03125, TA: 5.38 });
   const straight = fusionTool('tapered mill', { DC: 0.25, TA: 0 });
   const pointed = fusionTool('tapered mill', { DC: 0.25, TA: 15 });
+  // An ncSender without the tapered-ball type gets a ball, which it can save.
   assert.deepStrictEqual([cove.type, bowl.type, taperedBall.type, straight.type, pointed.type], ['ball', 'ball', 'ball', 'flat', 'v-bit']);
   assert.strictEqual(taperedBall.dimensions.taper_angle, 5.38);
   assert.strictEqual(cove.dimensions.radius, 9.525);
+});
+
+test('a tapered mill with a round tip and a taper is a Tapered Ball Nose when the server knows it', () => {
+  const server = { taperedBall: true, shankDiameter: true };
+  // SpeTool W01015 as Fusion exports it: 1/32" R, 5.38 deg per side, 1" flutes, 1/4" shank.
+  const w01015 = fusionTool('tapered mill', { DC: 0.0625, RE: 0.03125, TA: 5.380000000000003, LCF: 1, OAL: 2.5, NOF: 2, SFDM: 0.25 }, 'inches', server);
+  assert.strictEqual(w01015.type, 'tapered-ball');
+  assert.strictEqual(w01015.diameter, 1.5875); // the tip, 2 x the tip radius
+  assert.deepStrictEqual({ ...w01015.dimensions }, {
+    flute_length: 25.4, overall_length: 63.5, taper_angle: 5.38, radius: 0.79375, shank_diameter: 6.35
+  });
+  // No taper (cove, bowl) stays a ball; no radius stays a V-bit or flat.
+  const cove = fusionTool('tapered mill', { DC: 0.75, RE: 0.375, TA: 0 }, 'inches', server);
+  const pointed = fusionTool('tapered mill', { DC: 0.25, TA: 15 }, 'inches', server);
+  const ballEnd = fusionTool('ball end mill', { DC: 0.25, RE: 0.125, TA: 3 }, 'inches', server);
+  assert.deepStrictEqual([cove.type, pointed.type, ballEnd.type], ['ball', 'v-bit', 'ball']);
+});
+
+test('the paste path reads a Tapered Ball Nose and its Shaft Diameter', () => {
+  const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)\t' +
+    'Corner Radius (tool_cornerRadius)\tTaper Angle (tool_taperAngle)\tShaft Diameter (tool_shaftDiameter)';
+  const rows = [header, '1\t5\t0.0625\tinches\ttapered mill\t0.03125\t5.38\t0.25'].join('\n');
+  const [known] = lib.parseTSVData(rows, { preserveToolNumber: true }, { taperedBall: true });
+  const [old] = lib.parseTSVData(rows, { preserveToolNumber: true });
+  assert.strictEqual(known.type, 'tapered-ball');
+  assert.strictEqual(old.type, 'ball');
+  assert.strictEqual(known.dimensions.shank_diameter, 6.35);
+  assert.strictEqual(known.dimensions.taper_angle, 5.38);
+});
+
+test('a shank diameter Fusion does not give is left out', () => {
+  const tool = fusionTool('flat end mill', { DC: 6, SFDM: 0 }, 'millimeters');
+  assert.strictEqual(tool.dimensions, undefined);
+  assert.strictEqual(fusionTool('flat end mill', { DC: 6, SFDM: 6 }, 'millimeters').dimensions.shank_diameter, 6);
+});
+
+test('a shank change is only reported when the server keeps shank_diameter', () => {
+  const existing = { toolId: 1, name: 'a', type: 'flat', diameter: 6, metadata: {}, dimensions: {} };
+  const incoming = { toolId: 1, name: 'a', type: 'flat', diameter: 6, metadata: {}, dimensions: { shank_diameter: 6 } };
+  const old = lib.computeComparison([existing], [incoming], { preserveToolNumber: true });
+  const known = lib.computeComparison([existing], [incoming], { preserveToolNumber: true }, [], { shankDiameter: true });
+  assert.strictEqual(old[0].status, 'unchanged');
+  assert.deepStrictEqual([...known[0].changes], ['Shank Diameter']);
+});
+
+// A fake ncSender: validates the type, then looks for the id, as ToolService.UpdateAsync does.
+function fakeServer(types, { routes = true, fail = false } = {}) {
+  const calls = [];
+  const fetchFn = async (url, init) => {
+    calls.push({ url, method: init.method, type: JSON.parse(init.body).type });
+    if (fail) throw new Error('offline');
+    if (!routes) return { status: 404 };
+    return { status: types.includes(JSON.parse(init.body).type) ? 404 : 400 };
+  };
+  return { fetchFn, calls };
+}
+
+test('probeToolTypes finds tapered-ball on a server that accepts it, saving nothing', async () => {
+  const { fetchFn, calls } = fakeServer(['flat', 'ball', 'tapered-ball']);
+  const found = await lib.probeToolTypes(fetchFn, [{ id: 1 }]);
+  assert.deepStrictEqual({ ...found }, { taperedBall: true, shankDiameter: true });
+  assert.ok(calls.every(c => c.method === 'PUT' && c.url === '/api/tools/2147483647'), JSON.stringify(calls));
+});
+
+test('probeToolTypes keeps ball on an older server, a missing route or no connection', async () => {
+  const older = await lib.probeToolTypes(fakeServer(['flat', 'ball']).fetchFn, []);
+  const noRoute = await lib.probeToolTypes(fakeServer([], { routes: false }).fetchFn, []);
+  const offline = await lib.probeToolTypes(fakeServer([], { fail: true }).fetchFn, []);
+  assert.deepStrictEqual([older.taperedBall, noRoute.taperedBall, offline.taperedBall], [false, false, false]);
+  // A library that already holds a shank diameter keeps it, whatever the type list.
+  const withShank = await lib.probeToolTypes(fakeServer(['flat']).fetchFn, [{ id: 1, dimensions: { shank_diameter: 6 } }]);
+  assert.deepStrictEqual({ ...withShank }, { taperedBall: false, shankDiameter: true });
+});
+
+test('probeToolTypes never sends a tool to an id the library uses', async () => {
+  const { fetchFn, calls } = fakeServer(['tapered-ball']);
+  const found = await lib.probeToolTypes(fetchFn, [{ id: 2147483647 }]);
+  assert.strictEqual(found.taperedBall, false);
+  assert.strictEqual(calls.length, 0);
 });
 
 test('a tapered mill with no taper given stays a V-bit; a dovetail keeps no taper angle', () => {
@@ -651,7 +731,7 @@ let passed = 0;
 let failed = 0;
 for (const t of tests) {
   try {
-    t.fn();
+    await t.fn();
     console.log(`  ok  ${t.name}`);
     passed++;
   } catch (err) {

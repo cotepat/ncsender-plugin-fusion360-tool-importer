@@ -481,11 +481,12 @@
       });
     }
 
-    // Fusion's flute count, lengths and corner radius (in mm) and taper angle (in
-    // degrees from the axis: 45 for a 90° V-bit). ncSender's tool editor doesn't show
-    // them but keeps them, and plugins can read them: the flutes for feeds, the angle
-    // for V-bits.
-    function toolExtras(flutes, fluteLength, overallLength, taperAngle, cornerRadius, toMm) {
+    // Fusion's flute count, lengths, corner radius and shank (SFDM) in mm, and taper
+    // angle (in degrees from the axis: 45 for a 90° V-bit). ncSender's tool editor
+    // doesn't show them all but keeps them, and plugins can read them: the flutes for
+    // feeds, the angle for V-bits and tapered ball noses. An ncSender too old to know
+    // shank_diameter drops it on save.
+    function toolExtras(flutes, fluteLength, overallLength, taperAngle, cornerRadius, toMm, shankDiameter) {
       const extras = {};
       const count = parseInt(flutes, 10);
       if (count > 0) extras.flutes = count;
@@ -501,6 +502,8 @@
       if (angle > 0 && angle < 90) dimensions.taper_angle = Math.round(angle * 1000) / 1000;
       const radius = mm(cornerRadius);
       if (radius) dimensions.radius = radius;
+      const shank = mm(shankDiameter);
+      if (shank) dimensions.shank_diameter = shank;
       if (Object.keys(dimensions).length > 0) extras.dimensions = dimensions;
       return extras;
     }
@@ -508,10 +511,13 @@
     // Fusion types with no single ncSender match. A radius mill (roundover) cuts
     // DC + 2 RE across: DC is only its tip. A form mill whose profile is a straight
     // line from the tip out to the full diameter is a V-bit. A tapered mill with a
-    // round tip is a ball (cove, bowl, tapered ball nose), and one Fusion gives a
-    // taper of 0 is flat; without a taper given it stays a V-bit. A dovetail's angle
-    // isn't a V's, so it isn't kept. `geometry` is in the tool's own units.
-    function toolShape(fusionType, geometry) {
+    // round tip and a taper is a Tapered Ball Nose (DC is its tip, as ncSender
+    // stores one) when the server knows that type, else a ball; with no taper it's a
+    // ball (cove, bowl). One Fusion gives a taper of 0 and no radius is flat; without
+    // a taper given it stays a V-bit. A dovetail's angle isn't a V's, so it isn't
+    // kept. `geometry` is in the tool's own units; `server` is what probeToolTypes
+    // found.
+    function toolShape(fusionType, geometry, server = {}) {
       const type = (fusionType || '').toLowerCase();
       const radius = geometry.RE > 0 ? geometry.RE : 0;
       const taper = geometry.TA > 0 && type !== 'dovetail mill' ? geometry.TA : 0;
@@ -521,6 +527,9 @@
       if (type === 'form mill') {
         const vAngle = straightVAngle(geometry.profile, geometry.DC);
         if (vAngle) return { type: 'v-bit', diameter: geometry.DC, taperAngle: vAngle };
+      }
+      if (type === 'tapered mill' && radius > 0 && taper > 0 && server.taperedBall) {
+        return { type: 'tapered-ball', diameter: geometry.DC, taperAngle: taper };
       }
       if (type === 'tapered mill' && (radius > 0 || geometry.TA === 0)) {
         return { type: radius > 0 ? 'ball' : 'flat', diameter: geometry.DC, taperAngle: taper };
@@ -541,6 +550,33 @@
       if (Math.abs(x - diameter / 2) > diameter * 0.01) return null;
       const angle = Math.round(Math.atan2(x, y) * 180 / Math.PI * 1000) / 1000;
       return angle < 80 ? angle : null;
+    }
+
+    // Which newer tool fields this ncSender keeps. Older versions refuse to save a
+    // tool type they don't know, so tapered-ball is only written when the server
+    // accepts it. PUT /api/tools/{id} checks the tool before looking for the id: an
+    // unknown type is a 400, a known one on an id nobody has is a 404 and saves
+    // nothing. A made-up type must come back 400 first, so a missing route or a
+    // proxy's 404 can't pass for support. Tapered Ball Nose (ncSender#111) came
+    // with shank_diameter (#110), and a library that already holds one has it too.
+    const PROBE_ID = 2147483647;
+    async function probeToolTypes(fetchFn, existingTools = []) {
+      const status = async (type) => {
+        try {
+          const response = await fetchFn(`/api/tools/${PROBE_ID}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: PROBE_ID, name: 'type check', type, diameter: 1, offsets: { tlo: 0, x: 0, y: 0, z: 0 } })
+          });
+          return response.status;
+        } catch (error) {
+          return 0;
+        }
+      };
+      const inUse = existingTools.some(t => t.id === PROBE_ID);
+      const taperedBall = !inUse && await status('not-a-tool-type') === 400 && await status('tapered-ball') === 404;
+      const shankDiameter = taperedBall || existingTools.some(t => t.dimensions?.shank_diameter != null);
+      return { taperedBall, shankDiameter };
     }
 
     function withExtras(tool, extras) {
@@ -576,7 +612,7 @@
       return values;
     }
 
-    function convertTSVTool(values, columnMap, settings) {
+    function convertTSVTool(values, columnMap, settings, server) {
       const getValue = (columnName) => {
         const index = columnMap[columnName];
         if (index === undefined || index >= values.length) return '';
@@ -632,7 +668,7 @@
         DC: tipDiameter,
         RE: parseFloat(getValue('Corner Radius (tool_cornerRadius)')),
         TA: parseFloat(getValue('Taper Angle (tool_taperAngle)'))
-      });
+      }, server);
       const ncSenderType = shape.type;
 
       let diameterInMm = shape.diameter;
@@ -670,7 +706,8 @@
         getValue('Overall Length (tool_overallLength)'),
         shape.taperAngle,
         getValue('Corner Radius (tool_cornerRadius)'),
-        unit.includes('inch') ? 25.4 : 1
+        unit.includes('inch') ? 25.4 : 1,
+        getValue('Shaft Diameter (tool_shaftDiameter)')
       );
 
       return withExtras({
@@ -688,7 +725,7 @@
       }, extras);
     }
 
-    function parseTSVData(tsvText, settings) {
+    function parseTSVData(tsvText, settings, server) {
       const lines = tsvText.split('\n').filter(line => line.trim() !== '');
       if (lines.length < 2) {
         return [];
@@ -709,7 +746,7 @@
       for (let i = 1; i < lines.length; i++) {
         try {
           const values = parseTSVLine(lines[i]);
-          const tool = convertTSVTool(values, columnMap, settings);
+          const tool = convertTSVTool(values, columnMap, settings, server);
           if (tool) {
             tools.push(tool);
           }
@@ -725,7 +762,7 @@
       return tools;
     }
 
-    function convertFusionTool(fusionTool, settings) {
+    function convertFusionTool(fusionTool, settings, server) {
       const fusionToolNumber = fusionTool['post-process']?.number;
       if (fusionToolNumber === undefined || fusionToolNumber === null) {
         throw new Error('Tool missing Fusion 360 tool number');
@@ -741,7 +778,7 @@
       if (!(geometry.DC > 0)) {
         throw new Error(`Invalid diameter: ${geometry.DC || 0}`);
       }
-      const shape = toolShape(fusionTool.type, geometry);
+      const shape = toolShape(fusionTool.type, geometry, server);
       const ncSenderType = shape.type;
 
       const toolUnitFromExpressions = fusionTool.expressions?.tool_unit || '';
@@ -753,7 +790,7 @@
       if (unitStr.includes('inch')) {
         diameterInMm = shape.diameter * 25.4;
       }
-      const extras = toolExtras(geometry.NOF, geometry.LCF, geometry.OAL, shape.taperAngle, geometry.RE, unitStr.includes('inch') ? 25.4 : 1);
+      const extras = toolExtras(geometry.NOF, geometry.LCF, geometry.OAL, shape.taperAngle, geometry.RE, unitStr.includes('inch') ? 25.4 : 1, geometry.SFDM);
 
       diameterInMm = Math.round(diameterInMm * 100000) / 100000;
 
@@ -819,7 +856,7 @@
       return length != null && Math.abs((existing.dimensions?.[key] || 0) - length) > 0.001;
     }
 
-    function computeComparison(existingTools, newTools, settings, duplicates = []) {
+    function computeComparison(existingTools, newTools, settings, duplicates = [], server = {}) {
       const result = newTools.map(newTool => {
         const existing = existingTools.find(t => t.toolId === newTool.toolId);
         let status = 'new';
@@ -838,6 +875,8 @@
           if (lengthChanged(existing, newTool, 'overall_length')) changes.push('Overall Length');
           if (lengthChanged(existing, newTool, 'taper_angle')) changes.push('Taper Angle');
           if (lengthChanged(existing, newTool, 'radius')) changes.push('Corner Radius');
+          // An ncSender that drops shank_diameter would show it changed on every import.
+          if (server.shankDiameter && lengthChanged(existing, newTool, 'shank_diameter')) changes.push('Shank Diameter');
 
           status = changes.length > 0 ? 'modified' : 'unchanged';
         }
@@ -987,7 +1026,7 @@
     return {
       TYPE_MAPPING, escapeHtml, parseTSVLine, parseTSVData,
       convertTSVTool, convertFusionTool, computeComparison, applyPreservedSlots,
-      splitDuplicates, readMachine, numberingNotice, mergeTool, planImport, markSlotLosses
+      probeToolTypes, splitDuplicates, readMachine, numberingNotice, mergeTool, planImport, markSlotLosses
     };
   })();
 </script>
@@ -996,7 +1035,7 @@
   (function() {
     const {
       escapeHtml, parseTSVData, convertFusionTool, computeComparison, applyPreservedSlots,
-      splitDuplicates, readMachine, numberingNotice, planImport, markSlotLosses
+      probeToolTypes, splitDuplicates, readMachine, numberingNotice, planImport, markSlotLosses
     } = window.__fusionImportInternals;
 
     const initialConfig = __INITIAL_CONFIG__;
@@ -1009,6 +1048,8 @@
     let slotProblems = [];
     let slotEvictions = [];
     let machine = readMachine(null);
+    let server = {}; // what probeToolTypes found, set by loadExistingTools
+    let serverProbe = null; // the server can't change while the dialog is open
     let comparison = [];
     let dataSource = null; // 'file' or 'clipboard'
     let originalData = null; // Store original data for rebuilding
@@ -1056,6 +1097,8 @@
       } catch (error) {
         console.error('Failed to load existing tools:', error);
       }
+      if (!serverProbe) serverProbe = probeToolTypes(fetch.bind(window), existingTools);
+      server = await serverProbe;
     }
 
     // Every source goes through here, so file and clipboard imports treat
@@ -1089,14 +1132,14 @@
 
         dataSource = 'clipboard';
         originalData = clipboardText;
-        const tools = parseTSVData(clipboardText, settings);
+        await loadExistingTools(); // before converting: it learns which types the server takes
+        const tools = parseTSVData(clipboardText, settings, server);
 
         if (tools.length === 0) {
           showError('No valid tools found in clipboard data');
           return;
         }
 
-        await loadExistingTools();
         newTools = prepareTools(tools);
         rebuildComparison();
 
@@ -1136,12 +1179,13 @@
 
         dataSource = 'file';
         originalData = fusionData;
+        await loadExistingTools(); // before converting: it learns which types the server takes
         newTools = [];
         const errors = [];
 
         for (const fusionTool of fusionData.data || []) {
           try {
-            const ncTool = convertFusionTool(fusionTool, settings);
+            const ncTool = convertFusionTool(fusionTool, settings, server);
             newTools.push(ncTool);
           } catch (error) {
             errors.push(`Tool ${fusionTool['post-process']?.number || 'unknown'}: ${error.message}`);
@@ -1162,7 +1206,6 @@
           return;
         }
 
-        await loadExistingTools();
         newTools = prepareTools(newTools);
         rebuildComparison();
 
@@ -1183,7 +1226,7 @@
     };
 
     function rebuildComparison() {
-      comparison = computeComparison(existingTools, newTools, settings, duplicateTools);
+      comparison = computeComparison(existingTools, newTools, settings, duplicateTools, server);
       const importable = comparison.filter(c => c.status === 'new' || c.status === 'modified').map(c => c.tool);
       const plan = planFor(importable);
       slotProblems = plan.problems;
@@ -1269,12 +1312,12 @@
         const built = [];
         for (const fusionTool of originalData.data || []) {
           try {
-            built.push(convertFusionTool(fusionTool, settings));
+            built.push(convertFusionTool(fusionTool, settings, server));
           } catch (error) {}
         }
         newTools = built;
       } else if (dataSource === 'clipboard' && originalData) {
-        newTools = parseTSVData(originalData, settings);
+        newTools = parseTSVData(originalData, settings, server);
       }
       newTools = prepareTools(newTools);
     }
