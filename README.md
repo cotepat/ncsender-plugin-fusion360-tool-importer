@@ -22,7 +22,7 @@ This plugin allows you to:
 - **File Import**: Import complete tool libraries from JSON exports
 - **Full Metadata**: Names, types, diameters, offsets, and specifications preserved
 - **Flutes, Lengths and Angles**: Each tool's number of flutes, flute length, overall length, corner radius, taper angle and shank diameter come along. ncSender doesn't show them yet, but it keeps them for plugins to use, such as feeds and speeds by flute count, or a V-bit's angle
-- **Bit Types**: Roundover bits come in as wide as they cut (not their tip), V-groove form mills as V-bits (from a JSON export, which has their profile), bowl and cove bits as ball end mills, and tapered ball nose bits (a round tip and a taper) as Tapered Ball Nose on an ncSender that has that type, else as ball end mills
+- **Bit Types**: Roundover bits come in as wide as they cut (not their tip), V-groove form mills as V-bits (from a JSON export, which has their profile), cove bits as ball end mills, tapered ball nose bits (a round tip and a taper) as Tapered Ball Nose, and bull nose end mills and bowl bits (a flat bottom with rounded corners) as Bull Nose / Bowl on an ncSender that has those types, else as ball end mills
 
 ![Tool Import Dialog](docs/screenshots/tool-import-dialog.png)
 *Tool import comparison*

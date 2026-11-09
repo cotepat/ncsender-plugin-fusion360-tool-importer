@@ -288,6 +288,33 @@ test('a tapered mill with a round tip and a taper is a Tapered Ball Nose when th
   assert.deepStrictEqual([cove.type, pointed.type, ballEnd.type], ['ball', 'v-bit', 'ball']);
 });
 
+test('bull nose end mills and bowl bits are Bull Nose / Bowl when the server knows it', () => {
+  const server = { taperedBall: true, bullNose: true, shankDiameter: true };
+  // SpeTool W08002 bowl and tray bit: 3/4" across, 1/4" corners, 1/2" shank
+  const bowl = fusionTool('tapered mill', { DC: 0.75, RE: 0.25, TA: 0, LCF: 0.625, SFDM: 0.5 }, 'inches', server);
+  assert.strictEqual(bowl.type, 'bull-nose');
+  assert.strictEqual(bowl.diameter, 19.05);
+  assert.deepStrictEqual({ ...bowl.dimensions }, { flute_length: 15.875, radius: 6.35, shank_diameter: 12.7 });
+  const bull = fusionTool('bull nose end mill', { DC: 6, RE: 1 }, 'millimeters', server);
+  assert.strictEqual(bull.type, 'bull-nose');
+  assert.strictEqual(bull.diameter, 6);
+  // A tapered bowl bit keeps its taper
+  const taperedBowl = fusionTool('tapered mill', { DC: 0.75, RE: 0.125, TA: 10 }, 'inches', server);
+  assert.deepStrictEqual([taperedBowl.type, taperedBowl.dimensions.taper_angle], ['bull-nose', 10]);
+  // Half of DC is a round end: cove and tapered ball nose as before
+  const cove = fusionTool('tapered mill', { DC: 0.75, RE: 0.375, TA: 0 }, 'inches', server);
+  const tbn = fusionTool('tapered mill', { DC: 0.0625, RE: 0.03125, TA: 5.38 }, 'inches', server);
+  const ballEnd = fusionTool('bull nose end mill', { DC: 6, RE: 3 }, 'millimeters', server);
+  assert.deepStrictEqual([cove.type, tbn.type, ballEnd.type], ['ball', 'tapered-ball', 'ball']);
+  // An ncSender without bull-nose gets a ball, as before; a tapered bowl isn't a tapered ball
+  const old = { taperedBall: true };
+  assert.deepStrictEqual(
+    [fusionTool('tapered mill', { DC: 0.75, RE: 0.25, TA: 0 }, 'inches', old).type,
+      fusionTool('bull nose end mill', { DC: 6, RE: 1 }, 'millimeters', old).type,
+      fusionTool('tapered mill', { DC: 0.75, RE: 0.125, TA: 10 }, 'inches', old).type],
+    ['ball', 'ball', 'ball']);
+});
+
 test('the paste path reads a Tapered Ball Nose and its Shaft Diameter', () => {
   const header = 'Tool Index (tool_index)\tNumber (tool_number)\tDiameter (tool_diameter)\tUnit (tool_unit)\tType (tool_type)\t' +
     'Corner Radius (tool_cornerRadius)\tTaper Angle (tool_taperAngle)\tShaft Diameter (tool_shaftDiameter)';
@@ -330,7 +357,9 @@ function fakeServer(types, { routes = true, fail = false } = {}) {
 test('probeToolTypes finds tapered-ball on a server that accepts it, saving nothing', async () => {
   const { fetchFn, calls } = fakeServer(['flat', 'ball', 'tapered-ball']);
   const found = await lib.probeToolTypes(fetchFn, [{ id: 1 }]);
-  assert.deepStrictEqual({ ...found }, { taperedBall: true, shankDiameter: true });
+  assert.deepStrictEqual({ ...found }, { taperedBall: true, bullNose: false, shankDiameter: true });
+  const both = await lib.probeToolTypes(fakeServer(['ball', 'tapered-ball', 'bull-nose']).fetchFn, []);
+  assert.deepStrictEqual({ ...both }, { taperedBall: true, bullNose: true, shankDiameter: true });
   assert.ok(calls.every(c => c.method === 'PUT' && c.url === '/api/tools/2147483647'), JSON.stringify(calls));
 });
 
@@ -339,9 +368,10 @@ test('probeToolTypes keeps ball on an older server, a missing route or no connec
   const noRoute = await lib.probeToolTypes(fakeServer([], { routes: false }).fetchFn, []);
   const offline = await lib.probeToolTypes(fakeServer([], { fail: true }).fetchFn, []);
   assert.deepStrictEqual([older.taperedBall, noRoute.taperedBall, offline.taperedBall], [false, false, false]);
+  assert.deepStrictEqual([older.bullNose, noRoute.bullNose, offline.bullNose], [false, false, false]);
   // A library that already holds a shank diameter keeps it, whatever the type list.
   const withShank = await lib.probeToolTypes(fakeServer(['flat']).fetchFn, [{ id: 1, dimensions: { shank_diameter: 6 } }]);
-  assert.deepStrictEqual({ ...withShank }, { taperedBall: false, shankDiameter: true });
+  assert.deepStrictEqual({ ...withShank }, { taperedBall: false, bullNose: false, shankDiameter: true });
 });
 
 test('probeToolTypes never sends a tool to an id the library uses', async () => {

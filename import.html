@@ -513,7 +513,9 @@
     // line from the tip out to the full diameter is a V-bit. A tapered mill with a
     // round tip and a taper is a Tapered Ball Nose (DC is its tip, as ncSender
     // stores one) when the server knows that type, else a ball; with no taper it's a
-    // ball (cove, bowl). One Fusion gives a taper of 0 and no radius is flat; without
+    // ball (cove). A bull nose end mill, or a tapered mill whose corner radius is
+    // under half of DC (a bowl bit), is a Bull Nose / Bowl when the server knows
+    // that type (DC across the cut), else a ball as before. One Fusion gives a taper of 0 and no radius is flat; without
     // a taper given it stays a V-bit. A dovetail's angle isn't a V's, so it isn't
     // kept. `geometry` is in the tool's own units; `server` is what probeToolTypes
     // found.
@@ -528,7 +530,14 @@
         const vAngle = straightVAngle(geometry.profile, geometry.DC);
         if (vAngle) return { type: 'v-bit', diameter: geometry.DC, taperAngle: vAngle };
       }
-      if (type === 'tapered mill' && radius > 0 && taper > 0 && server.taperedBall) {
+      // A radius of half DC is a round end (ball, cove, tapered ball nose);
+      // less leaves a flat between rounded corners (bull nose, bowl bit)
+      const roundEnd = radius > 0 && radius >= geometry.DC / 2 * 0.99;
+      const corners = radius > 0 && !roundEnd;
+      if ((type === 'bull nose end mill' || type === 'tapered mill') && corners && server.bullNose) {
+        return { type: 'bull-nose', diameter: geometry.DC, taperAngle: taper };
+      }
+      if (type === 'tapered mill' && roundEnd && taper > 0 && server.taperedBall) {
         return { type: 'tapered-ball', diameter: geometry.DC, taperAngle: taper };
       }
       if (type === 'tapered mill' && (radius > 0 || geometry.TA === 0)) {
@@ -558,7 +567,8 @@
     // unknown type is a 400, a known one on an id nobody has is a 404 and saves
     // nothing. A made-up type must come back 400 first, so a missing route or a
     // proxy's 404 can't pass for support. Tapered Ball Nose (ncSender#111) came
-    // with shank_diameter (#110), and a library that already holds one has it too.
+    // with shank_diameter (#110), and so did Bull Nose / Bowl (stacked on it); a
+    // library that already holds one has it too.
     const PROBE_ID = 2147483647;
     async function probeToolTypes(fetchFn, existingTools = []) {
       const status = async (type) => {
@@ -574,9 +584,11 @@
         }
       };
       const inUse = existingTools.some(t => t.id === PROBE_ID);
-      const taperedBall = !inUse && await status('not-a-tool-type') === 400 && await status('tapered-ball') === 404;
-      const shankDiameter = taperedBall || existingTools.some(t => t.dimensions?.shank_diameter != null);
-      return { taperedBall, shankDiameter };
+      const checked = !inUse && await status('not-a-tool-type') === 400;
+      const taperedBall = checked && await status('tapered-ball') === 404;
+      const bullNose = checked && await status('bull-nose') === 404;
+      const shankDiameter = taperedBall || bullNose || existingTools.some(t => t.dimensions?.shank_diameter != null);
+      return { taperedBall, bullNose, shankDiameter };
     }
 
     function withExtras(tool, extras) {
