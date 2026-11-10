@@ -7,6 +7,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(__dirname, '..', 'import.html'), 'utf8');
@@ -18,7 +19,7 @@ if (!match) {
   process.exit(1);
 }
 
-const sandbox = { window: {}, console };
+const sandbox = { window: {}, console, TextDecoder, Blob, Response, DecompressionStream };
 vm.createContext(sandbox);
 vm.runInContext(match[1], sandbox, { filename: 'import.html#script[0]' });
 
@@ -646,12 +647,87 @@ test('the helpers script does not clash with names from another plugin', () => {
   assert.strictEqual(typeof page.window.__fusionImportInternals.escapeHtml, 'function');
 });
 
+// ---------- .tools files (a zip holding tools.json) ----------
+// Builds a zip the way Fusion 360 writes a .tools file: one entry per file,
+// a central directory, and an end record.
+function zip(files, { deflate = true } = {}) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, text] of files) {
+    const nameBytes = Buffer.from(name);
+    const raw = Buffer.from(text);
+    const data = deflate ? zlib.deflateRawSync(raw) : raw;
+    const crc = zlib.crc32(raw);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(deflate ? 8 : 0, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(raw.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(deflate ? 8 : 0, 10);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(raw.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(offset, 42);
+    locals.push(local, nameBytes, data);
+    centrals.push(central, nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+  const directory = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return new Uint8Array(Buffer.concat([...locals, directory, end]));
+}
+
+const library = JSON.stringify({ data: [{ type: 'flat end mill', description: '1/4 Upcut', geometry: { DC: 6.35 } }] });
+
+test('a .tools file is read through its tools.json', async () => {
+  const text = await lib.readLibraryText(zip([['tools.json', library]]));
+  assert.strictEqual(JSON.parse(text).data[0].description, '1/4 Upcut');
+});
+
+test('a .tools file with stored (uncompressed) entries is read too', async () => {
+  const text = await lib.readLibraryText(zip([['tools.json', library]], { deflate: false }));
+  assert.strictEqual(JSON.parse(text).data[0].geometry.DC, 6.35);
+});
+
+test('tools.json is found among other files in the .tools zip', async () => {
+  const text = await lib.readLibraryText(zip([['meta.txt', 'x'], ['library/tools.json', library]]));
+  assert.strictEqual(JSON.parse(text).data.length, 1);
+});
+
+test('a plain JSON export is read as text, unchanged', async () => {
+  const text = await lib.readLibraryText(new TextEncoder().encode(library));
+  assert.strictEqual(text, library);
+});
+
+test('a .tools zip with no JSON inside says so', async () => {
+  await assert.rejects(lib.readLibraryText(zip([['readme.txt', 'hi']])), /No tool library/);
+});
+
+test('a cut-off .tools file says it looks damaged', async () => {
+  const whole = zip([['tools.json', library]]);
+  await assert.rejects(lib.readLibraryText(whole.subarray(0, 40)), /damaged/);
+});
+
 // ---------- runner ----------
 let passed = 0;
 let failed = 0;
 for (const t of tests) {
   try {
-    t.fn();
+    await t.fn();
     console.log(`  ok  ${t.name}`);
     passed++;
   } catch (err) {
