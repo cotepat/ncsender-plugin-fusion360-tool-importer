@@ -348,7 +348,7 @@
 
 <div class="fusion-import-container">
   <div class="fusion-header">
-    <p>Import tools from Fusion 360 tool library (JSON file or clipboard paste)</p>
+    <p>Import tools from a Fusion 360 tool library (.tools or JSON file, or clipboard paste)</p>
   </div>
 
   <!-- Numbering Notice -->
@@ -356,9 +356,9 @@
 
   <!-- File Selector -->
   <div id="fileSelector" class="fusion-file-selector">
-    <input type="file" id="fileInput" accept=".json">
+    <input type="file" id="fileInput" accept=".tools,.json">
     <button id="selectFileBtn" class="fusion-btn fusion-btn-primary">
-      Select Fusion 360 JSON File
+      Select Fusion 360 Library (.tools or .json)
     </button>
     <div style="margin-top: 12px;">
       <button id="pasteClipboardBtn" class="fusion-btn fusion-btn-secondary">
@@ -984,7 +984,51 @@
       });
     }
 
+    // A Fusion 360 .tools file is a zip holding the library as tools.json.
+    // Reads that JSON straight from the zip (stored or deflated entries),
+    // or returns the text as is for a plain .json export.
+    async function readLibraryText(bytes) {
+      const isZip = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b
+        && bytes[2] === 0x03 && bytes[3] === 0x04;
+      if (!isZip) return new TextDecoder().decode(bytes);
+
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      let end = -1;
+      for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+        if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
+      }
+      if (end < 0) throw new Error('This .tools file looks damaged: its zip index is missing.');
+
+      const count = view.getUint16(end + 10, true);
+      let at = view.getUint32(end + 16, true);
+      const entries = [];
+      for (let n = 0; n < count && view.getUint32(at, true) === 0x02014b50; n++) {
+        const nameLength = view.getUint16(at + 28, true);
+        entries.push({
+          method: view.getUint16(at + 10, true),
+          size: view.getUint32(at + 20, true),
+          offset: view.getUint32(at + 42, true),
+          name: new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLength)),
+        });
+        at += 46 + nameLength + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+      }
+
+      const entry = entries.find(e => e.name.split('/').pop().toLowerCase() === 'tools.json')
+        || entries.find(e => e.name.toLowerCase().endsWith('.json'));
+      if (!entry) throw new Error('No tool library (tools.json) found inside this .tools file.');
+
+      const start = entry.offset + 30 + view.getUint16(entry.offset + 26, true)
+        + view.getUint16(entry.offset + 28, true);
+      const data = bytes.subarray(start, start + entry.size);
+      if (entry.method === 0) return new TextDecoder().decode(data);
+      if (entry.method !== 8) throw new Error('This .tools file uses a compression this importer can\'t read.');
+
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      return new TextDecoder().decode(new Uint8Array(await new Response(stream).arrayBuffer()));
+    }
+
     return {
+      readLibraryText,
       TYPE_MAPPING, escapeHtml, parseTSVLine, parseTSVData,
       convertTSVTool, convertFusionTool, computeComparison, applyPreservedSlots,
       splitDuplicates, readMachine, numberingNotice, mergeTool, planImport, markSlotLosses
@@ -996,7 +1040,7 @@
   (function() {
     const {
       escapeHtml, parseTSVData, convertFusionTool, computeComparison, applyPreservedSlots,
-      splitDuplicates, readMachine, numberingNotice, planImport, markSlotLosses
+      splitDuplicates, readMachine, numberingNotice, planImport, markSlotLosses, readLibraryText
     } = window.__fusionImportInternals;
 
     const initialConfig = __INITIAL_CONFIG__;
@@ -1131,7 +1175,7 @@
       document.getElementById('successDisplay').classList.add('fusion-hidden');
 
       try {
-        const content = await file.text();
+        const content = await readLibraryText(new Uint8Array(await file.arrayBuffer()));
         const fusionData = JSON.parse(content);
 
         dataSource = 'file';
